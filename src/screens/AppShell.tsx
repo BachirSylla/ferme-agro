@@ -6,8 +6,7 @@ import { CatalogueScreen } from './catalogue/CatalogueScreen';
 import { LotsScreen } from './lots/LotsScreen';
 import { ProductionScreen } from './production/ProductionScreen';
 import { FinancesScreen } from './finances/FinancesScreen';
-
-type View = 'dashboard' | 'catalogue' | 'lots' | 'production' | 'finances';
+import type { View } from './navigation';
 
 export function AppShell() {
   const session = useSession();
@@ -54,7 +53,7 @@ export function AppShell() {
 
       <main className="flex-1 px-4 sm:px-6 py-5 max-w-3xl mx-auto w-full pb-28">
         {view === 'dashboard' ? (
-          <DashboardScreen />
+          <DashboardScreen onNavigate={setView} />
         ) : view === 'catalogue' ? (
           <CatalogueScreen />
         ) : view === 'lots' ? (
