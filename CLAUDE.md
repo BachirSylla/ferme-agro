@@ -72,25 +72,52 @@ Enums Postgres :
 
 #### Produits de la ferme vs produits de négoce (convention, pas de champ en base)
 
-Deux flux **distincts** coexistent dans le catalogue. La distinction n'est pas
-matérialisée par une colonne (pour l'instant) — c'est une règle d'usage à respecter
-côté UI et conseils utilisateur. Le futur module **Stocks** la formalisera via le
-suivi des entrées (achats + récoltes) et des sorties (ventes/consommation).
+Deux flux **distincts** coexistent dans le catalogue. La distinction est purement
+**conventionnelle** (métier) — pas matérialisée par une colonne. Elle s'applique à
+**tout** produit, sans liste codée en dur.
 
-- **Produits de la ferme** (issus des animaux ou récoltes propres) — ex. œufs, lait, viande.
+- **Produits de la ferme** (issus des animaux ou récoltes propres) — ex. œufs,
+  lait, viande.
   - Cycle : `production_record` (recolte/ponte) → `sale` (revente).
   - Marge = `sale.total` − coûts (intrants, santé, dépenses imputées au lot).
-- **Produits de négoce** (achetés pour être revendus tels quels) — ex. **miel** dans
-  le contexte AGRO ELITE actuel (la ferme l'achète, ne le récolte pas).
-  - Cycle : `expense` (catégorie ex. `achat_marchandise`) → `sale` (revente).
+- **Produits de négoce** = TOUT produit ACHETÉ pour être REVENDU, quel qu'il soit :
+  miel, mangue, oignon, riz, fournitures, etc. **Le miel n'est qu'un exemple parmi
+  d'autres** — aucune logique en dur par nom de produit.
+  - Cycle : `expense` (catégorie « achat marchandise ») + entrée `stock_movements`
+    → `sale` (revente, sortie `stock_movements`).
   - **JAMAIS** saisi en `production_record` (rien à récolter).
-  - Marge = `sale.total` − `expense.amount` pour ces produits.
+  - Marge = somme des `sale.total` − somme des `expense.amount` pour ces produits.
 
 À garder en tête quand on ajoute de l'UX :
-- Les helpers/onboarding de l'écran Production ne doivent pas suggérer le miel
-  comme exemple de saisie (ni aucun produit du même flux).
-- Les rapports de marge devront tirer leurs coûts de `expenses` pour le négoce,
-  et des coûts imputés au lot pour la ferme — ne pas mélanger.
+- Les helpers/onboarding de l'écran Production ne doivent pas suggérer un produit
+  de négoce comme exemple de saisie.
+- Les rapports de marge tirent leurs coûts de `expenses` pour le négoce, et des
+  coûts imputés au lot pour la ferme — ne pas mélanger les sources.
+
+#### Stocks vs Cash — anti double-comptage
+
+Le **cash** (et le bénéfice mensuel lu via `v_financial_summary`) provient
+EXCLUSIVEMENT de `sales` (entrées) et `expenses` (sorties). Les `stock_movements`
+servent à suivre les **quantités physiques** et le **coût par lot** (rapport
+analytique via `v_lot_overview`), **jamais à recompter le cash**.
+
+Règles pour ne JAMAIS double-compter :
+
+- **Achat d'un intrant** = 1 `stock_movement` (`direction='entree'`) **+** 1
+  `expense` reliés par `expenses.stock_item_id`. Même évènement, compté **une
+  seule fois** côté cash (via l'`expense`).
+- **Consommation vers un lot** = 1 `stock_movement` (`direction='sortie'`) avec
+  `lot_id` + `cost`. **Aucune nouvelle dépense** : le cash est déjà sorti au moment
+  de l'achat. Le `cost` sert uniquement à l'imputation analytique au lot.
+- **Vente d'un produit fini** = 1 `stock_movement` (`direction='sortie'`) + 1
+  `sale`. Le revenu cash apparaît une seule fois via `sale.total`.
+
+**Ne JAMAIS** additionner `stock_movements.cost` avec `expenses.amount` dans un
+calcul de bénéfice. Les vues `v_financial_summary` et `v_lot_overview` respectent
+déjà ce principe — ne pas le casser côté UI.
+
+**Le bénéfice mensuel doit rester INCHANGÉ après une consommation vers un lot.**
+Seul le coût du lot bouge. C'est le juge de paix de la cohérence comptable.
 
 ## Conventions
 

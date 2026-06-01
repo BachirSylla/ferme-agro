@@ -7,5 +7,6 @@ export type View =
   | 'catalogue'
   | 'lots'
   | 'production'
+  | 'stocks'
   | 'finances'
   | 'stats';

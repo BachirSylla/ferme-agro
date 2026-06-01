@@ -4,6 +4,7 @@ import {
   BookOpen,
   Layers3,
   ClipboardList,
+  Boxes,
   Wallet,
   BarChart3,
   LogOut,
@@ -14,6 +15,7 @@ import { DashboardScreen } from './DashboardScreen';
 import { CatalogueScreen } from './catalogue/CatalogueScreen';
 import { LotsScreen } from './lots/LotsScreen';
 import { ProductionScreen } from './production/ProductionScreen';
+import { StocksScreen } from './stocks/StocksScreen';
 import { FinancesScreen } from './finances/FinancesScreen';
 import type { View } from './navigation';
 
@@ -74,6 +76,8 @@ export function AppShell() {
           <LotsScreen />
         ) : view === 'production' ? (
           <ProductionScreen />
+        ) : view === 'stocks' ? (
+          <StocksScreen />
         ) : view === 'finances' ? (
           <FinancesScreen />
         ) : (
@@ -117,6 +121,12 @@ export function AppShell() {
             label="Production"
           />
           <NavTab
+            active={view === 'stocks'}
+            onClick={() => setView('stocks')}
+            icon={<Boxes className="h-5 w-5" />}
+            label="Stocks"
+          />
+          <NavTab
             active={view === 'finances'}
             onClick={() => setView('finances')}
             icon={<Wallet className="h-5 w-5" />}
@@ -156,16 +166,19 @@ function NavTab({
           : 'text-neutral-500 hover:text-neutral-800')
       }
       aria-current={active ? 'page' : undefined}
+      aria-label={label}
     >
       <span
         className={
-          'rounded-lg px-2.5 py-1 transition-colors ' +
+          'rounded-lg px-2 py-1 transition-colors ' +
           (active ? 'bg-brand/10' : '')
         }
       >
         {icon}
       </span>
-      {label}
+      {/* En dessous de 380px (iPhone SE), on cache le label : icônes seules
+          + aria-label sur le bouton pour l'accessibilité. */}
+      <span className="hidden min-[380px]:inline">{label}</span>
     </button>
   );
 }
