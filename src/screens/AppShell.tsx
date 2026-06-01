@@ -1,5 +1,14 @@
-import { useState } from 'react';
-import { LayoutDashboard, BookOpen, Layers3, ClipboardList, Wallet, LogOut } from 'lucide-react';
+import { lazy, Suspense, useState } from 'react';
+import {
+  LayoutDashboard,
+  BookOpen,
+  Layers3,
+  ClipboardList,
+  Wallet,
+  BarChart3,
+  LogOut,
+  Loader2,
+} from 'lucide-react';
 import { useSession } from '@/context/SessionContext';
 import { DashboardScreen } from './DashboardScreen';
 import { CatalogueScreen } from './catalogue/CatalogueScreen';
@@ -7,6 +16,11 @@ import { LotsScreen } from './lots/LotsScreen';
 import { ProductionScreen } from './production/ProductionScreen';
 import { FinancesScreen } from './finances/FinancesScreen';
 import type { View } from './navigation';
+
+// Lazy : StatsScreen embarque recharts (~lourd). Sortir cette dépendance du
+// chunk initial garde l'app de saisie quotidienne légère ; ne charge qu'au
+// clic sur l'onglet Stats.
+const StatsScreen = lazy(() => import('./stats/StatsScreen'));
 
 export function AppShell() {
   const session = useSession();
@@ -60,8 +74,19 @@ export function AppShell() {
           <LotsScreen />
         ) : view === 'production' ? (
           <ProductionScreen />
-        ) : (
+        ) : view === 'finances' ? (
           <FinancesScreen />
+        ) : (
+          <Suspense
+            fallback={
+              <div className="flex items-center justify-center py-12 text-neutral-500 gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span className="text-sm">Chargement des statistiques…</span>
+              </div>
+            }
+          >
+            <StatsScreen />
+          </Suspense>
         )}
       </main>
 
@@ -97,6 +122,12 @@ export function AppShell() {
             icon={<Wallet className="h-5 w-5" />}
             label="Finances"
           />
+          <NavTab
+            active={view === 'stats'}
+            onClick={() => setView('stats')}
+            icon={<BarChart3 className="h-5 w-5" />}
+            label="Stats"
+          />
         </div>
       </nav>
     </div>
@@ -119,7 +150,7 @@ function NavTab({
       type="button"
       onClick={onClick}
       className={
-        'flex-1 py-2.5 flex flex-col items-center gap-0.5 text-xs font-medium transition-colors ' +
+        'flex-1 py-2 flex flex-col items-center gap-0.5 text-[10px] sm:text-xs font-medium leading-tight whitespace-nowrap transition-colors min-w-0 ' +
         (active
           ? 'text-brand'
           : 'text-neutral-500 hover:text-neutral-800')
@@ -128,7 +159,7 @@ function NavTab({
     >
       <span
         className={
-          'rounded-lg px-3 py-1 transition-colors ' +
+          'rounded-lg px-2.5 py-1 transition-colors ' +
           (active ? 'bg-brand/10' : '')
         }
       >
