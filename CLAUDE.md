@@ -64,9 +64,33 @@ Enums Postgres :
 - `user_role` : `proprietaire` · `superviseur` (l'enum SQL est nommé `user_role` car `role` est mot-clé Postgres)
 - `stock_direction` : `entree` · `sortie`
 
-Règles métier : un `product` peut viser une `species` (œuf ← caille) ou aucune (miel).
-Un `incubation_batch` peut générer un nouveau `lot` à l'éclosion. Une vente (`sale`) a plusieurs
-lignes (`sale_item`) pour permettre plusieurs produits.
+### Règles métier
+
+- Un `product` peut viser une `species` (œuf ← caille) ou aucune (miel).
+- Un `incubation_batch` peut générer un nouveau `lot` à l'éclosion.
+- Une vente (`sale`) a plusieurs lignes (`sale_item`) pour permettre plusieurs produits.
+
+#### Produits de la ferme vs produits de négoce (convention, pas de champ en base)
+
+Deux flux **distincts** coexistent dans le catalogue. La distinction n'est pas
+matérialisée par une colonne (pour l'instant) — c'est une règle d'usage à respecter
+côté UI et conseils utilisateur. Le futur module **Stocks** la formalisera via le
+suivi des entrées (achats + récoltes) et des sorties (ventes/consommation).
+
+- **Produits de la ferme** (issus des animaux ou récoltes propres) — ex. œufs, lait, viande.
+  - Cycle : `production_record` (recolte/ponte) → `sale` (revente).
+  - Marge = `sale.total` − coûts (intrants, santé, dépenses imputées au lot).
+- **Produits de négoce** (achetés pour être revendus tels quels) — ex. **miel** dans
+  le contexte AGRO ELITE actuel (la ferme l'achète, ne le récolte pas).
+  - Cycle : `expense` (catégorie ex. `achat_marchandise`) → `sale` (revente).
+  - **JAMAIS** saisi en `production_record` (rien à récolter).
+  - Marge = `sale.total` − `expense.amount` pour ces produits.
+
+À garder en tête quand on ajoute de l'UX :
+- Les helpers/onboarding de l'écran Production ne doivent pas suggérer le miel
+  comme exemple de saisie (ni aucun produit du même flux).
+- Les rapports de marge devront tirer leurs coûts de `expenses` pour le négoce,
+  et des coûts imputés au lot pour la ferme — ne pas mélanger.
 
 ## Conventions
 
