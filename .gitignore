@@ -1,0 +1,20 @@
+node_modules
+dist
+dev-dist
+.env
+.env.local
+*.local
+!.env.example
+.DS_Store
+*.log
+
+# Caches d'outillage (machine-spécifique)
+*.tsbuildinfo
+.eslintcache
+
+# Config locale de Claude Code (permissions/outils par machine)
+.claude/
+
+# Supabase
+supabase/.branches
+supabase/.temp
