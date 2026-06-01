@@ -1,411 +1,53 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-} from 'recharts';
+import { useState } from 'react';
+import { TrendingUp, Target } from 'lucide-react';
+import { EvolutionPanel } from './EvolutionPanel';
+import { GoalsPanel } from './GoalsPanel';
 
-// Type local pour le contenu de Tooltip — recharts 3.x n'expose plus
-// TooltipProps avec les champs payload/label, mais le runtime les fournit.
-type TooltipContentProps = {
-  active?: boolean;
-  payload?: Array<{
-    name?: string;
-    value?: number;
-    color?: string;
-    dataKey?: string | number;
-  }>;
-  label?: string | number;
-};
-import { ChevronLeft, ChevronRight, LineChart as LineIcon, BarChart3 } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
-import { useSession } from '@/context/SessionContext';
-import {
-  abbreviateXof,
-  addMonthsIso,
-  firstOfMonthIso,
-  lastOfMonthIso,
-  monthLongLabel,
-  monthShortLabel,
-  qtyFmt,
-  xofFmt,
-} from '@/lib/format';
-import type { Enums, Views } from '@/types/db';
-
-type Summary = Views<'v_financial_summary'>;
-type Category = Enums<'production_category'>;
-type ProductionRow = { day: string; quantity: number; category: Category };
-
-type Mode = 'range12' | 'range6' | 'navigate';
-
-const CATEGORY_LABEL: Record<Category, string> = {
-  ponte: 'Ponte',
-  casse: 'Casse',
-  consomme: 'Consommé',
-  recolte: 'Récolte',
-};
-const CATEGORY_COLOR: Record<Category, string> = {
-  ponte: '#059669', // emerald-600
-  casse: '#dc2626', // red-600
-  consomme: '#d97706', // amber-600
-  recolte: '#2563eb', // blue-600
-};
-
-const COLOR_REVENUS = '#059669';
-const COLOR_DEPENSES = '#dc2626';
-const COLOR_BENEFICE = '#0284c7'; // sky-600
-
-const CHART_HEIGHT = 250;
-
-type FinPoint = {
-  label: string;
-  mois: string;
-  revenus: number;
-  depenses: number;
-  benefice: number;
-};
-
-type ProdPoint = {
-  label: string;
-  Ponte: number;
-  Casse: number;
-  Consommé: number;
-  Récolte: number;
-};
+type Tab = 'evolution' | 'goals';
 
 export function StatsScreen() {
-  const session = useSession();
-  if (session.status !== 'authenticated') return null;
-
-  const [mode, setMode] = useState<Mode>('range12');
-  const [cursor, setCursor] = useState<string>(firstOfMonthIso());
-
-  // Mois inclus dans la période (chaque élément = 'YYYY-MM-01').
-  const months = useMemo<string[]>(() => {
-    if (mode === 'navigate') return [cursor];
-    const count = mode === 'range12' ? 12 : 6;
-    const end = firstOfMonthIso(); // mois courant
-    return Array.from({ length: count }, (_, i) => addMonthsIso(end, -(count - 1 - i)));
-  }, [mode, cursor]);
-
-  const startDay = months[0]; // 'YYYY-MM-01'
-  const endDay = lastOfMonthIso(months[months.length - 1]);
-  const isSingleMonth = mode === 'navigate';
-
-  const [summaries, setSummaries] = useState<Summary[] | null>(null);
-  const [productions, setProductions] = useState<ProductionRow[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchData = useCallback(async () => {
-    setError(null);
-    setSummaries(null);
-    setProductions(null);
-    const [sumRes, prodRes] = await Promise.all([
-      supabase
-        .from('v_financial_summary')
-        .select('*')
-        .in('mois', months)
-        .order('mois', { ascending: true }),
-      supabase
-        .from('production_records')
-        .select('day, quantity, category')
-        .gte('day', startDay)
-        .lte('day', endDay)
-        .is('deleted_at', null),
-    ]);
-    if (sumRes.error) {
-      setError(sumRes.error.message);
-      return;
-    }
-    if (prodRes.error) {
-      setError(prodRes.error.message);
-      return;
-    }
-    setSummaries(sumRes.data ?? []);
-    setProductions((prodRes.data ?? []) as ProductionRow[]);
-  }, [months, startDay, endDay]);
-
-  useEffect(() => {
-    void fetchData();
-  }, [fetchData]);
-
-  // ─── Données graphes ─────────────────────────────────────
-  const finData = useMemo<FinPoint[]>(() => {
-    return months.map((m) => {
-      const row = summaries?.find((s) => s.mois === m);
-      return {
-        label: monthShortLabel(m),
-        mois: m,
-        revenus: row?.revenus ?? 0,
-        depenses: row?.depenses ?? 0,
-        benefice: row?.benefice ?? 0,
-      };
-    });
-  }, [months, summaries]);
-
-  const prodData = useMemo<ProdPoint[]>(() => {
-    const empty = (): ProdPoint => ({
-      label: '',
-      Ponte: 0,
-      Casse: 0,
-      Consommé: 0,
-      Récolte: 0,
-    });
-    const labelFromCategory = (c: Category): keyof Omit<ProdPoint, 'label'> => {
-      // Garde l'accent dans les labels mais on conserve les clés correspondantes.
-      return CATEGORY_LABEL[c] as keyof Omit<ProdPoint, 'label'>;
-    };
-
-    if (isSingleMonth) {
-      // Une barre par jour du mois choisi.
-      const [y, m] = months[0].split('-').map(Number);
-      const daysInMonth = new Date(y, m, 0).getDate();
-      const byDay = new Map<string, ProdPoint>();
-      for (let i = 1; i <= daysInMonth; i++) {
-        const day = `${months[0].slice(0, 7)}-${String(i).padStart(2, '0')}`;
-        const point = empty();
-        point.label = String(i);
-        byDay.set(day, point);
-      }
-      for (const p of productions ?? []) {
-        const point = byDay.get(p.day);
-        if (point) point[labelFromCategory(p.category)] += p.quantity;
-      }
-      return Array.from(byDay.values());
-    }
-    // Range : une barre par mois.
-    const byMonth = new Map<string, ProdPoint>();
-    for (const m of months) {
-      const point = empty();
-      point.label = monthShortLabel(m);
-      byMonth.set(m, point);
-    }
-    for (const p of productions ?? []) {
-      const month = `${p.day.slice(0, 7)}-01`;
-      const point = byMonth.get(month);
-      if (point) point[labelFromCategory(p.category)] += p.quantity;
-    }
-    return Array.from(byMonth.values());
-  }, [months, productions, isSingleMonth]);
-
-  // ─── Table mensuelle ─────────────────────────────────────
-  const tableRows = useMemo(() => {
-    return months
-      .map((m) => {
-        const sum = summaries?.find((s) => s.mois === m);
-        const prodTotal = (productions ?? [])
-          .filter((p) => p.day.slice(0, 7) === m.slice(0, 7))
-          .reduce((acc, p) => acc + p.quantity, 0);
-        return {
-          mois: m,
-          label: monthLongLabel(m),
-          revenus: sum?.revenus ?? 0,
-          depenses: sum?.depenses ?? 0,
-          benefice: sum?.benefice ?? 0,
-          production: prodTotal,
-        };
-      })
-      .reverse(); // mois récent en haut
-  }, [months, summaries, productions]);
-
-  const loading = summaries === null || productions === null;
-  const hasData =
-    !loading && (summaries.length > 0 || (productions && productions.length > 0));
+  const [tab, setTab] = useState<Tab>('evolution');
 
   return (
     <div className="flex flex-col gap-5">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Statistiques</h1>
         <p className="text-sm text-neutral-500 mt-0.5">
-          Évolution financière et production sur la période.
+          Évolution financière, production et objectifs.
         </p>
       </div>
 
-      <PeriodSelector
-        mode={mode}
-        setMode={setMode}
-        cursor={cursor}
-        setCursor={setCursor}
-      />
-
-      {error && (
-        <div role="alert" className="text-sm bg-red-50 text-red-800 border border-red-200 rounded-lg px-3 py-2">
-          Erreur : {error}
-        </div>
-      )}
-
-      {/* Courbe financière */}
-      <ChartCard title="Évolution financière" icon={<LineIcon className="h-4 w-4" />}>
-        {loading ? (
-          <ChartSkeleton />
-        ) : !hasData ? (
-          <EmptyChart message="Les courbes se rempliront au fil de vos saisies." />
-        ) : (
-          <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-            <LineChart data={finData} margin={{ top: 5, right: 8, left: -10, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
-              <XAxis
-                dataKey="label"
-                tick={{ fontSize: 11, fill: '#6b7280' }}
-                stroke="#9ca3af"
-                interval="preserveStartEnd"
-              />
-              <YAxis
-                tick={{ fontSize: 11, fill: '#6b7280' }}
-                stroke="#9ca3af"
-                tickFormatter={(v: number) => abbreviateXof(v)}
-                width={48}
-              />
-              <Tooltip content={<FinancialTooltip />} cursor={{ stroke: '#d1d5db' }} />
-              <Legend wrapperStyle={{ fontSize: 12 }} iconType="circle" />
-              <Line
-                type="monotone"
-                dataKey="revenus"
-                name="Revenus"
-                stroke={COLOR_REVENUS}
-                strokeWidth={2}
-                dot={{ r: 3 }}
-                activeDot={{ r: 5 }}
-              />
-              <Line
-                type="monotone"
-                dataKey="depenses"
-                name="Dépenses"
-                stroke={COLOR_DEPENSES}
-                strokeWidth={2}
-                dot={{ r: 3 }}
-                activeDot={{ r: 5 }}
-              />
-              <Line
-                type="monotone"
-                dataKey="benefice"
-                name="Bénéfice"
-                stroke={COLOR_BENEFICE}
-                strokeWidth={2}
-                dot={{ r: 3 }}
-                activeDot={{ r: 5 }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        )}
-      </ChartCard>
-
-      {/* Bar chart production */}
-      <ChartCard
-        title={isSingleMonth ? 'Production par jour' : 'Production par mois'}
-        icon={<BarChart3 className="h-4 w-4" />}
-        hint="Quantités saisies par catégorie. Les unités varient selon le produit."
-      >
-        {loading ? (
-          <ChartSkeleton />
-        ) : !hasData ? (
-          <EmptyChart message="Saisissez votre première production pour voir les barres apparaître." />
-        ) : (
-          <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-            <BarChart data={prodData} margin={{ top: 5, right: 8, left: -15, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
-              <XAxis
-                dataKey="label"
-                tick={{ fontSize: 11, fill: '#6b7280' }}
-                stroke="#9ca3af"
-                interval={isSingleMonth ? 2 : 0}
-              />
-              <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} stroke="#9ca3af" width={40} />
-              <Tooltip content={<ProductionTooltip />} cursor={{ fill: '#f3f4f6' }} />
-              <Legend wrapperStyle={{ fontSize: 12 }} iconType="circle" />
-              <Bar dataKey="Ponte" fill={CATEGORY_COLOR.ponte} radius={[3, 3, 0, 0]} />
-              <Bar dataKey="Casse" fill={CATEGORY_COLOR.casse} radius={[3, 3, 0, 0]} />
-              <Bar dataKey="Consommé" fill={CATEGORY_COLOR.consomme} radius={[3, 3, 0, 0]} />
-              <Bar dataKey="Récolte" fill={CATEGORY_COLOR.recolte} radius={[3, 3, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        )}
-      </ChartCard>
-
-      {/* Tableau mensuel */}
-      <ChartCard title="Récapitulatif mensuel" icon={null}>
-        {loading ? (
-          <TableSkeleton />
-        ) : (
-          <MonthlyTable rows={tableRows} />
-        )}
-      </ChartCard>
-    </div>
-  );
-}
-
-// ─── Sélecteur de période ───────────────────────────────────
-
-function PeriodSelector({
-  mode,
-  setMode,
-  cursor,
-  setCursor,
-}: {
-  mode: Mode;
-  setMode: (m: Mode) => void;
-  cursor: string;
-  setCursor: (c: string) => void;
-}) {
-  const nowMonth = firstOfMonthIso();
-  const canGoForward = cursor < nowMonth;
-
-  return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div role="tablist" className="flex bg-neutral-100 rounded-xl p-1 self-start">
-        <ModeTab active={mode === 'range12'} onClick={() => setMode('range12')}>
-          12 mois
-        </ModeTab>
-        <ModeTab active={mode === 'range6'} onClick={() => setMode('range6')}>
-          6 mois
-        </ModeTab>
-        <ModeTab active={mode === 'navigate'} onClick={() => setMode('navigate')}>
-          Mois précis
-        </ModeTab>
+        <TabButton
+          active={tab === 'evolution'}
+          onClick={() => setTab('evolution')}
+          icon={<TrendingUp className="h-4 w-4" />}
+        >
+          Évolution
+        </TabButton>
+        <TabButton
+          active={tab === 'goals'}
+          onClick={() => setTab('goals')}
+          icon={<Target className="h-4 w-4" />}
+        >
+          Objectifs
+        </TabButton>
       </div>
 
-      {mode === 'navigate' && (
-        <div className="flex items-center gap-1.5 self-start sm:self-auto">
-          <button
-            type="button"
-            onClick={() => setCursor(addMonthsIso(cursor, -1))}
-            className="p-1.5 rounded-md text-neutral-600 hover:bg-neutral-100"
-            aria-label="Mois précédent"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <span className="text-sm font-medium min-w-[100px] text-center capitalize">
-            {monthLongLabel(cursor)}
-          </span>
-          <button
-            type="button"
-            onClick={() => canGoForward && setCursor(addMonthsIso(cursor, 1))}
-            disabled={!canGoForward}
-            className="p-1.5 rounded-md text-neutral-600 hover:bg-neutral-100 disabled:opacity-30 disabled:cursor-not-allowed"
-            aria-label="Mois suivant"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
-      )}
+      {tab === 'evolution' ? <EvolutionPanel /> : <GoalsPanel />}
     </div>
   );
 }
 
-function ModeTab({
+function TabButton({
   active,
   onClick,
+  icon,
   children,
 }: {
   active: boolean;
   onClick: () => void;
+  icon: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -415,169 +57,17 @@ function ModeTab({
       aria-selected={active}
       onClick={onClick}
       className={
-        'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ' +
-        (active ? 'bg-white text-neutral-900 shadow-sm' : 'text-neutral-600 hover:text-neutral-900')
+        'px-4 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ' +
+        (active
+          ? 'bg-white text-neutral-900 shadow-sm'
+          : 'text-neutral-600 hover:text-neutral-900')
       }
     >
+      {icon}
       {children}
     </button>
   );
 }
 
-// ─── Carte conteneur ────────────────────────────────────────
-
-function ChartCard({
-  title,
-  icon,
-  hint,
-  children,
-}: {
-  title: string;
-  icon: React.ReactNode;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-2xl bg-white border border-neutral-200 shadow-sm p-4 flex flex-col gap-2">
-      <div className="flex items-center gap-2">
-        {icon && (
-          <span className="h-7 w-7 rounded-lg bg-brand/10 text-brand grid place-items-center">
-            {icon}
-          </span>
-        )}
-        <h2 className="font-semibold text-neutral-800">{title}</h2>
-      </div>
-      {hint && <p className="text-xs text-neutral-500 -mt-1">{hint}</p>}
-      {children}
-    </section>
-  );
-}
-
-// ─── Tooltips ────────────────────────────────────────────────
-
-function FinancialTooltip({ active, payload, label }: TooltipContentProps) {
-  if (!active || !payload || payload.length === 0) return null;
-  return (
-    <div className="bg-white border border-neutral-200 rounded-lg p-2 shadow-md text-xs min-w-[140px]">
-      <div className="font-semibold mb-1 capitalize">{label}</div>
-      {payload.map((p) => (
-        <div key={String(p.dataKey)} className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full" style={{ background: p.color ?? '#999' }} />
-            <span className="text-neutral-600">{p.name}</span>
-          </div>
-          <span className="font-medium text-neutral-900">
-            {xofFmt.format(Number(p.value ?? 0))} FCFA
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function ProductionTooltip({ active, payload, label }: TooltipContentProps) {
-  if (!active || !payload || payload.length === 0) return null;
-  return (
-    <div className="bg-white border border-neutral-200 rounded-lg p-2 shadow-md text-xs min-w-[120px]">
-      <div className="font-semibold mb-1">{label}</div>
-      {payload.map((p) => {
-        const v = Number(p.value ?? 0);
-        if (v === 0) return null;
-        return (
-          <div key={String(p.dataKey)} className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full" style={{ background: p.color ?? '#999' }} />
-              <span className="text-neutral-600">{p.name}</span>
-            </div>
-            <span className="font-medium text-neutral-900">{qtyFmt.format(v)}</span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ─── Tableau mensuel ────────────────────────────────────────
-
-function MonthlyTable({
-  rows,
-}: {
-  rows: {
-    mois: string;
-    label: string;
-    revenus: number;
-    depenses: number;
-    benefice: number;
-    production: number;
-  }[];
-}) {
-  return (
-    <div className="overflow-x-auto -mx-1">
-      <table className="min-w-full text-sm">
-        <thead>
-          <tr className="text-left text-xs uppercase tracking-wider text-neutral-500 border-b border-neutral-200">
-            <th className="py-2 px-2 font-medium">Mois</th>
-            <th className="py-2 px-2 font-medium text-right">Revenus</th>
-            <th className="py-2 px-2 font-medium text-right">Dépenses</th>
-            <th className="py-2 px-2 font-medium text-right">Bénéfice</th>
-            <th className="py-2 px-2 font-medium text-right">Production</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-neutral-100">
-          {rows.map((r) => (
-            <tr key={r.mois}>
-              <td className="py-2 px-2 capitalize whitespace-nowrap">{r.label}</td>
-              <td className="py-2 px-2 text-right tabular-nums">{xofFmt.format(r.revenus)}</td>
-              <td className="py-2 px-2 text-right tabular-nums">{xofFmt.format(r.depenses)}</td>
-              <td
-                className={
-                  'py-2 px-2 text-right tabular-nums font-medium ' +
-                  (r.benefice > 0
-                    ? 'text-emerald-700'
-                    : r.benefice < 0
-                      ? 'text-red-700'
-                      : 'text-neutral-700')
-                }
-              >
-                {xofFmt.format(r.benefice)}
-              </td>
-              <td className="py-2 px-2 text-right tabular-nums text-neutral-700">
-                {qtyFmt.format(r.production)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-// ─── Skeletons ───────────────────────────────────────────────
-
-function ChartSkeleton() {
-  return <div className="w-full bg-neutral-100 rounded animate-pulse" style={{ height: CHART_HEIGHT }} />;
-}
-
-function TableSkeleton() {
-  return (
-    <div className="flex flex-col gap-2">
-      {[0, 1, 2].map((i) => (
-        <div key={i} className="h-6 bg-neutral-100 rounded animate-pulse" />
-      ))}
-    </div>
-  );
-}
-
-function EmptyChart({ message }: { message: string }) {
-  return (
-    <div
-      style={{ height: CHART_HEIGHT }}
-      className="rounded-xl border border-dashed border-neutral-300 bg-neutral-50/50 grid place-items-center p-6 text-center"
-    >
-      <p className="text-sm text-neutral-500 max-w-sm">{message}</p>
-    </div>
-  );
-}
-
-// Export default pour permettre le lazy load propre via React.lazy.
+// Default export pour le React.lazy() côté AppShell.
 export default StatsScreen;
