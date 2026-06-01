@@ -1,14 +1,24 @@
+import { SessionProvider, useSession } from '@/context/SessionContext';
+import { AuthScreen } from '@/screens/AuthScreen';
+import { AppShell } from '@/screens/AppShell';
+
+function Gate() {
+  const session = useSession();
+  if (session.status === 'loading') {
+    return (
+      <main className="min-h-full grid place-items-center">
+        <div className="text-sm text-neutral-500">Chargement…</div>
+      </main>
+    );
+  }
+  if (session.status === 'unauthenticated') return <AuthScreen />;
+  return <AppShell />;
+}
+
 export default function App() {
   return (
-    <main className="mx-auto flex min-h-full max-w-md flex-col items-center justify-center gap-4 p-6 text-center">
-      <div className="h-16 w-16 rounded-2xl bg-brand text-brand-fg grid place-items-center text-2xl font-bold">
-        F
-      </div>
-      <h1 className="text-2xl font-semibold">Ferme</h1>
-      <p className="text-neutral-600">
-        Scaffold prêt. Phase 1 (MVP) à construire : auth, catalogue, lots, production,
-        ventes, dépenses, dashboard.
-      </p>
-    </main>
+    <SessionProvider>
+      <Gate />
+    </SessionProvider>
   );
 }
