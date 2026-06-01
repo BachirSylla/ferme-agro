@@ -42,6 +42,17 @@ const METRIC_UNIT: Record<SupportedMetric, 'xof' | 'count'> = {
   benefice: 'xof',
 };
 
+// La projection linéaire (prorata temporis) suppose un flux régulier. Elle est
+// valide pour la ponte (rythme journalier ~stable) mais trompeuse pour les
+// métriques financières cumulées : un gros achat ponctuel d'aliment en début
+// de mois extrapole un déficit absurde à 30 jours. On la cache donc pour
+// revenus/bénéfice et on affiche une note neutre à la place.
+const SUPPORTS_LINEAR_PROJECTION: Record<SupportedMetric, boolean> = {
+  production_oeufs: true,
+  revenus: false,
+  benefice: false,
+};
+
 const FUTURE_METRICS: { key: string; label: string }[] = [
   { key: 'taux_mortalite', label: 'Taux de mortalité' },
   { key: 'marge_par_lot', label: 'Marge par lot' },
@@ -354,8 +365,11 @@ function Progression({
   const StatusIcon = palette.icon;
 
   // Projection linéaire : valeur extrapolée à la fin de la période au rythme actuel.
-  // Pertinente seulement si la période est en cours et qu'au moins 1 jour est écoulé.
-  const showProjection = !isPast && !isFuture && elapsed >= 1;
+  // Pertinente seulement si la métrique est un flux régulier (cf. SUPPORTS_LINEAR_PROJECTION)
+  // ET si la période est en cours avec au moins 1 jour écoulé.
+  const supportsProjection = SUPPORTS_LINEAR_PROJECTION[metric];
+  const periodInProgress = !isPast && !isFuture && elapsed >= 1;
+  const showProjection = supportsProjection && periodInProgress;
   const projection = showProjection ? (actual / elapsed) * totalDays : null;
 
   const fillPct = Math.max(0, Math.min(100, progressPct));
@@ -398,6 +412,13 @@ function Progression({
         <p className="text-xs text-neutral-500">
           Au rythme actuel : estimé à <span className="font-medium text-neutral-700">{formatValue(metric, Math.round(projection))}</span>{' '}
           en fin de période ({elapsed}/{totalDays} j). <span className="italic">Estimation linéaire.</span>
+        </p>
+      )}
+      {!supportsProjection && periodInProgress && (
+        <p className="text-xs text-neutral-500 italic">
+          Projection non affichée : trop sensible aux mouvements ponctuels
+          (gros achat, vente importante…) qui faussent une extrapolation
+          linéaire en début de période.
         </p>
       )}
       {isPast && (
