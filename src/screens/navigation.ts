@@ -9,4 +9,5 @@ export type View =
   | 'production'
   | 'stocks'
   | 'finances'
+  | 'health'
   | 'stats';

@@ -3,6 +3,10 @@ import type { Enums } from '@/types/db';
 
 export const xofFmt = new Intl.NumberFormat('fr-FR');
 export const qtyFmt = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 3 });
+export const percentFmt = new Intl.NumberFormat('fr-FR', {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
 
 export function todayIso(): string {
   return new Date().toISOString().slice(0, 10);

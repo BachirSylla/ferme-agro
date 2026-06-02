@@ -17,6 +17,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import {
   firstOfMonthIso,
   lastOfMonthIso,
+  percentFmt,
   qtyFmt,
   xofFmt,
 } from '@/lib/format';
@@ -27,34 +28,40 @@ type Goal = Tables<'goals'>;
 // Métriques effectivement calculables au MVP. Toute autre métrique est listée
 // dans le formulaire mais marquée disabled — pas de saisie tant qu'on ne sait
 // pas la mesurer (cf. CLAUDE.md, P3 santé/objectifs pour le reste).
-const SUPPORTED_METRICS = ['production_oeufs', 'revenus', 'benefice'] as const;
+const SUPPORTED_METRICS = ['production_oeufs', 'revenus', 'benefice', 'taux_mortalite'] as const;
 type SupportedMetric = (typeof SUPPORTED_METRICS)[number];
 
 const METRIC_LABEL: Record<SupportedMetric, string> = {
   production_oeufs: 'Production d\u2019œufs (ponte)',
   revenus: 'Revenus',
   benefice: 'Bénéfice',
+  taux_mortalite: 'Taux de mortalité',
 };
 
-const METRIC_UNIT: Record<SupportedMetric, 'xof' | 'count'> = {
+const METRIC_UNIT: Record<SupportedMetric, 'xof' | 'count' | 'percent'> = {
   production_oeufs: 'count',
   revenus: 'xof',
   benefice: 'xof',
+  taux_mortalite: 'percent',
 };
+
+// Métriques inversées : la cible est un MAXIMUM à ne pas dépasser, pas un
+// objectif à atteindre. Le statut est inversé : sous la cible = bon.
+const INVERTED_METRICS: SupportedMetric[] = ['taux_mortalite'];
 
 // La projection linéaire (prorata temporis) suppose un flux régulier. Elle est
 // valide pour la ponte (rythme journalier ~stable) mais trompeuse pour les
 // métriques financières cumulées : un gros achat ponctuel d'aliment en début
 // de mois extrapole un déficit absurde à 30 jours. On la cache donc pour
-// revenus/bénéfice et on affiche une note neutre à la place.
+// revenus/bénéfice. Idem pour le taux de mortalité (taux instantané, pas un flux).
 const SUPPORTS_LINEAR_PROJECTION: Record<SupportedMetric, boolean> = {
   production_oeufs: true,
   revenus: false,
   benefice: false,
+  taux_mortalite: false,
 };
 
 const FUTURE_METRICS: { key: string; label: string }[] = [
-  { key: 'taux_mortalite', label: 'Taux de mortalité' },
   { key: 'marge_par_lot', label: 'Marge par lot' },
   { key: 'taux_eclosion', label: 'Taux d\u2019éclosion' },
 ];
@@ -67,7 +74,10 @@ const PERIOD_LABEL: Record<SupportedPeriod, string> = {
 };
 
 function formatValue(metric: SupportedMetric, value: number): string {
-  return METRIC_UNIT[metric] === 'xof' ? `${xofFmt.format(value)} FCFA` : qtyFmt.format(value);
+  const unit = METRIC_UNIT[metric];
+  if (unit === 'xof') return `${xofFmt.format(value)} FCFA`;
+  if (unit === 'percent') return `${percentFmt.format(value)} %`;
+  return qtyFmt.format(value);
 }
 
 // Renvoie les bornes [start, end] (dates YYYY-MM-DD) de la période actuelle
@@ -102,6 +112,29 @@ async function fetchMetricActual(
       .is('deleted_at', null);
     if (error) return null;
     return (data ?? []).reduce((acc, r) => acc + r.quantity, 0);
+  }
+  if (metric === 'taux_mortalite') {
+    // Taux = SUM(mortalité sur la période) / SUM(initial_count des lots actifs) × 100.
+    // Périmètre = lots actuellement non archivés (proxy raisonnable pour le MVP ;
+    // une future itération pourra restreindre aux lots ayant été actifs durant la période).
+    const [mortRes, lotsRes] = await Promise.all([
+      supabase
+        .from('health_records')
+        .select('affected_count')
+        .eq('type', 'mortalite')
+        .gte('day', start)
+        .lte('day', end)
+        .is('deleted_at', null),
+      supabase
+        .from('lots')
+        .select('initial_count')
+        .is('deleted_at', null),
+    ]);
+    if (mortRes.error || lotsRes.error) return null;
+    const mort = (mortRes.data ?? []).reduce((acc, r) => acc + r.affected_count, 0);
+    const totalInitial = (lotsRes.data ?? []).reduce((acc, l) => acc + l.initial_count, 0);
+    if (totalInitial === 0) return 0;
+    return (mort / totalInitial) * 100;
   }
   // revenus / benefice : on agrège v_financial_summary sur le range de mois.
   // Le RLS + security_invoker des vues isole déjà la ferme.
@@ -261,7 +294,8 @@ function GoalCard({
           <div className="min-w-0 flex-1">
             <div className="font-semibold truncate">{metricLabel}</div>
             <div className="text-xs text-neutral-500 truncate">
-              Cible : {formatValue(
+              Cible{isSupportedMetric && INVERTED_METRICS.includes(goal.metric as SupportedMetric) ? ' MAX' : ''} :{' '}
+              {formatValue(
                 isSupportedMetric ? (goal.metric as SupportedMetric) : 'revenus',
                 Number(goal.target_value),
               )}{' '}
@@ -343,25 +377,37 @@ function Progression({
 
   const progressPct = target === 0 ? 0 : (actual / target) * 100;
   const expectedPct = (elapsed / totalDays) * 100;
+  const isInverted = INVERTED_METRICS.includes(metric);
 
-  // Statut. Pour une cible que l'on veut atteindre (positive et croissante) :
-  //   atteinte si on dépasse 100 %
-  //   en bonne voie si progression ≥ progression attendue
-  //   à risque si on est à moins de 15 points sous la cible attendue
-  //   en retard sinon
+  // Statut.
+  // - Métrique normale (cible à atteindre) : >100 % atteint ; ≥ attendu en bonne voie ; ...
+  // - Métrique inversée (cible MAX à ne pas dépasser) : ≤ cible OK ; entre 80–100 % à risque ; >100 % dépassé.
   let status: 'achieved' | 'on_track' | 'at_risk' | 'behind';
-  if (progressPct >= 100) status = 'achieved';
-  else if (isFuture) status = 'on_track';
-  else if (progressPct >= expectedPct) status = 'on_track';
-  else if (progressPct >= expectedPct - 15) status = 'at_risk';
-  else status = 'behind';
+  if (isInverted) {
+    if (progressPct > 100) status = 'behind'; // au-dessus du max → dépassé
+    else if (progressPct > 80) status = 'at_risk'; // proche du max
+    else status = 'on_track'; // bien sous le max
+  } else {
+    if (progressPct >= 100) status = 'achieved';
+    else if (isFuture) status = 'on_track';
+    else if (progressPct >= expectedPct) status = 'on_track';
+    else if (progressPct >= expectedPct - 15) status = 'at_risk';
+    else status = 'behind';
+  }
 
-  const palette = {
+  const FORWARD_PALETTE = {
     achieved: { bar: 'bg-emerald-500', label: 'Atteint', text: 'text-emerald-700', icon: CheckCircle2 },
     on_track: { bar: 'bg-emerald-500', label: 'En bonne voie', text: 'text-emerald-700', icon: CheckCircle2 },
     at_risk: { bar: 'bg-amber-500', label: 'À risque', text: 'text-amber-700', icon: AlertTriangle },
     behind: { bar: 'bg-red-500', label: 'En retard', text: 'text-red-700', icon: TrendingDown },
-  }[status];
+  } as const;
+  const INVERTED_PALETTE = {
+    achieved: FORWARD_PALETTE.on_track, // jamais utilisé pour les inversées
+    on_track: { bar: 'bg-emerald-500', label: 'Sous le seuil', text: 'text-emerald-700', icon: CheckCircle2 },
+    at_risk: { bar: 'bg-amber-500', label: 'Proche du seuil', text: 'text-amber-700', icon: AlertTriangle },
+    behind: { bar: 'bg-red-500', label: 'Seuil dépassé', text: 'text-red-700', icon: TrendingDown },
+  } as const;
+  const palette = (isInverted ? INVERTED_PALETTE : FORWARD_PALETTE)[status];
   const StatusIcon = palette.icon;
 
   // Projection linéaire : valeur extrapolée à la fin de la période au rythme actuel.
@@ -541,7 +587,8 @@ function GoalForm({
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <label className="flex flex-col gap-1.5">
           <span className="text-sm font-medium text-neutral-700">
-            Cible {METRIC_UNIT[metric] === 'xof' ? '(FCFA)' : ''}
+            Cible{INVERTED_METRICS.includes(metric) ? ' MAX' : ''}{' '}
+            {METRIC_UNIT[metric] === 'xof' ? '(FCFA)' : METRIC_UNIT[metric] === 'percent' ? '(%)' : ''}
           </span>
           <input
             type="text"

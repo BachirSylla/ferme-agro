@@ -44,12 +44,17 @@ export function LotsScreen() {
 
   const [lots, setLots] = useState<Lot[] | null>(null);
   const [speciesById, setSpeciesById] = useState<Map<string, Species>>(new Map());
+  // Effectif actuel = initial − mortalités cumulées (dérivé, pas lu en base).
+  // Limite connue : les ventes d'animaux ne sont PAS encore liées au lot
+  // (sale_items.lot_id n'existe pas), donc le dérivé ne soustrait que la
+  // mortalité. À étendre quand sale_items portera un lot_id.
+  const [mortalityByLot, setMortalityByLot] = useState<Map<string, number>>(new Map());
   const [loadError, setLoadError] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>({ mode: 'closed' });
 
   const refresh = useCallback(async () => {
     setLoadError(null);
-    const [lotsRes, spRes] = await Promise.all([
+    const [lotsRes, spRes, healthRes] = await Promise.all([
       supabase
         .from('lots')
         .select('*')
@@ -61,14 +66,26 @@ export function LotsScreen() {
         .select('*')
         .is('deleted_at', null)
         .order('name', { ascending: true }),
+      supabase
+        .from('health_records')
+        .select('lot_id, affected_count')
+        .eq('type', 'mortalite')
+        .is('deleted_at', null),
     ]);
-    if (lotsRes.error || spRes.error) {
-      setLoadError(lotsRes.error?.message ?? spRes.error?.message ?? 'erreur');
+    if (lotsRes.error || spRes.error || healthRes.error) {
+      setLoadError(
+        lotsRes.error?.message ?? spRes.error?.message ?? healthRes.error?.message ?? 'erreur',
+      );
       setLots([]);
       return;
     }
     setLots(lotsRes.data);
     setSpeciesById(new Map(spRes.data.map((s) => [s.id, s])));
+    const mortMap = new Map<string, number>();
+    for (const h of healthRes.data ?? []) {
+      mortMap.set(h.lot_id, (mortMap.get(h.lot_id) ?? 0) + h.affected_count);
+    }
+    setMortalityByLot(mortMap);
   }, []);
 
   useEffect(() => {
@@ -145,6 +162,9 @@ export function LotsScreen() {
         <ul className="flex flex-col divide-y divide-neutral-200 rounded-2xl bg-white border border-neutral-200 overflow-hidden shadow-sm">
           {lots.map((l) => {
             const sp = speciesById.get(l.species_id);
+            // Effectif actuel dérivé (cf. commentaire en haut du composant).
+            const mortality = mortalityByLot.get(l.id) ?? 0;
+            const effective = Math.max(0, l.initial_count - mortality);
             return (
               <li
                 key={l.id}
@@ -164,10 +184,21 @@ export function LotsScreen() {
                         {sp?.name ?? 'Espèce inconnue'}
                       </span>
                       <span>·</span>
-                      <span className="font-medium text-neutral-700">
-                        {l.current_count}
+                      <span
+                        className="font-medium text-neutral-700"
+                        title={mortality > 0 ? `Initial ${l.initial_count} − mortalité ${mortality}` : undefined}
+                      >
+                        {effective}
                         <span className="text-neutral-400"> / {l.initial_count}</span>
                       </span>
+                      {mortality > 0 && (
+                        <>
+                          <span>·</span>
+                          <span className="text-neutral-600 italic">
+                            −{mortality} mortalité
+                          </span>
+                        </>
+                      )}
                       <span>·</span>
                       <span>{dateFmt.format(new Date(l.start_date))}</span>
                     </div>
@@ -226,7 +257,6 @@ function LotForm({
   const [speciesId, setSpeciesId] = useState(initial?.species_id ?? species[0]?.id ?? '');
   const [startDate, setStartDate] = useState(initial?.start_date ?? todayIso());
   const [initialCount, setInitialCount] = useState(String(initial?.initial_count ?? 0));
-  const [currentCount, setCurrentCount] = useState(String(initial?.current_count ?? 0));
   const [status, setStatus] = useState<LotStatus>(initial?.status ?? 'actif');
   const [notes, setNotes] = useState(initial?.notes ?? '');
 
@@ -239,16 +269,8 @@ function LotForm({
     setBusy(true);
 
     const initialNum = Number.parseInt(initialCount, 10);
-    const currentNum = isEdit
-      ? Number.parseInt(currentCount, 10)
-      : initialNum; // à la création, current = initial
     if (Number.isNaN(initialNum) || initialNum < 0) {
       setError('L\u2019effectif initial doit être un entier positif.');
-      setBusy(false);
-      return;
-    }
-    if (isEdit && (Number.isNaN(currentNum) || currentNum < 0)) {
-      setError('L\u2019effectif actuel doit être un entier positif.');
       setBusy(false);
       return;
     }
@@ -260,19 +282,24 @@ function LotForm({
 
     const trimmedCode = code.trim();
     const trimmedNotes = notes.trim();
-    const payload = {
+    // current_count : à la création, on l'aligne sur initial_count (NOT NULL en
+    // base). En édition, on n'y touche PAS — l'UI affiche un dérivé
+    // (initial − mortalités). La colonne current_count en base devient un
+    // simple historique non utilisé pour l'affichage.
+    const basePayload = {
       code: trimmedCode,
       species_id: speciesId,
       start_date: startDate,
       initial_count: initialNum,
-      current_count: currentNum,
       status,
       notes: trimmedNotes === '' ? null : trimmedNotes,
     };
 
     const { error: dbError } = initial
-      ? await supabase.from('lots').update(payload).eq('id', initial.id)
-      : await supabase.from('lots').insert({ ...payload, org_id: orgId });
+      ? await supabase.from('lots').update(basePayload).eq('id', initial.id)
+      : await supabase
+          .from('lots')
+          .insert({ ...basePayload, current_count: initialNum, org_id: orgId });
 
     setBusy(false);
     if (dbError) {
@@ -358,41 +385,23 @@ function LotForm({
         </label>
       </div>
 
-      <div className={isEdit ? 'grid grid-cols-1 sm:grid-cols-2 gap-3' : ''}>
-        <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-neutral-700">Effectif initial</span>
-          <input
-            type="number"
-            required
-            min={0}
-            step={1}
-            inputMode="numeric"
-            value={initialCount}
-            onChange={(e) => setInitialCount(e.target.value)}
-            className="border border-neutral-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand"
-          />
-          {!isEdit && (
-            <span className="text-xs text-neutral-500">
-              L'effectif actuel sera initialisé à cette valeur (éditable ensuite).
-            </span>
-          )}
-        </label>
-        {isEdit && (
-          <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-neutral-700">Effectif actuel</span>
-            <input
-              type="number"
-              required
-              min={0}
-              step={1}
-              inputMode="numeric"
-              value={currentCount}
-              onChange={(e) => setCurrentCount(e.target.value)}
-              className="border border-neutral-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand"
-            />
-          </label>
-        )}
-      </div>
+      <label className="flex flex-col gap-1.5">
+        <span className="text-sm font-medium text-neutral-700">Effectif initial</span>
+        <input
+          type="number"
+          required
+          min={0}
+          step={1}
+          inputMode="numeric"
+          value={initialCount}
+          onChange={(e) => setInitialCount(e.target.value)}
+          className="border border-neutral-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand"
+        />
+        <span className="text-xs text-neutral-500">
+          L'effectif actuel est <strong>calculé automatiquement</strong> : initial
+          moins les mortalités saisies dans Santé. Plus de saisie manuelle.
+        </span>
+      </label>
 
       <label className="flex flex-col gap-1.5">
         <span className="text-sm font-medium text-neutral-700">
