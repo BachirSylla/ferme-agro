@@ -8,6 +8,7 @@ import {
   Wallet,
   BarChart3,
   HeartPulse,
+  Egg,
   MoreHorizontal,
   LogOut,
   Loader2,
@@ -20,6 +21,7 @@ import { ProductionScreen } from './production/ProductionScreen';
 import { StocksScreen } from './stocks/StocksScreen';
 import { FinancesScreen } from './finances/FinancesScreen';
 import { HealthScreen } from './health/HealthScreen';
+import { IncubationScreen } from './incubation/IncubationScreen';
 import type { View } from './navigation';
 
 // Lazy : StatsScreen embarque recharts (~lourd). Sortir cette dépendance du
@@ -27,9 +29,9 @@ import type { View } from './navigation';
 // clic sur l'onglet Stats.
 const StatsScreen = lazy(() => import('./stats/StatsScreen'));
 
-// Vues "primaires" en bottom-nav (5) vs vues dans le menu "Plus" (3).
+// Vues "primaires" en bottom-nav (5) vs vues dans le menu "Plus" (4).
 // Le choix : opérations quotidiennes en bas, configuration/pilotage dans Plus.
-const PLUS_VIEWS: View[] = ['catalogue', 'health', 'stats'];
+const PLUS_VIEWS: View[] = ['catalogue', 'health', 'incubation', 'stats'];
 
 export function AppShell() {
   const session = useSession();
@@ -96,6 +98,8 @@ export function AppShell() {
           <FinancesScreen />
         ) : view === 'health' ? (
           <HealthScreen />
+        ) : view === 'incubation' ? (
+          <IncubationScreen />
         ) : (
           <Suspense
             fallback={
@@ -132,6 +136,12 @@ export function AppShell() {
                 label="Santé"
                 active={view === 'health'}
                 onClick={() => navigate('health')}
+              />
+              <PlusMenuItem
+                icon={<Egg className="h-4 w-4" />}
+                label="Incubation"
+                active={view === 'incubation'}
+                onClick={() => navigate('incubation')}
               />
               <PlusMenuItem
                 icon={<BarChart3 className="h-4 w-4" />}

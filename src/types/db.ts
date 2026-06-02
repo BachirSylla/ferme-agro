@@ -231,6 +231,7 @@ export interface Database {
         Row: {
           id: string;
           org_id: string;
+          species_id: string | null;
           source_lot_id: string | null;
           result_lot_id: string | null;
           set_date: string;
@@ -242,6 +243,7 @@ export interface Database {
         Insert: {
           id?: string;
           org_id: string;
+          species_id?: string | null;
           source_lot_id?: string | null;
           result_lot_id?: string | null;
           set_date?: string;
@@ -256,6 +258,7 @@ export interface Database {
         Update: {
           id?: string;
           org_id?: string;
+          species_id?: string | null;
           source_lot_id?: string | null;
           result_lot_id?: string | null;
           set_date?: string;

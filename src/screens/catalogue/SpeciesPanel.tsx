@@ -139,6 +139,18 @@ function SpeciesForm({
   const toast = useToast();
   const [name, setName] = useState(initial?.name ?? '');
   const [category, setCategory] = useState(initial?.category ?? '');
+  // Durée d'incubation : stockée dans species.attributes (JSONB) sous
+  // la clé `duree_incubation_jours`. Convention partagée avec le module
+  // Incubation pour calculer expected_hatch = set_date + N jours.
+  // Vide = pas de calcul automatique (l'utilisateur saisira la date à la main).
+  const initialDuree =
+    initial?.attributes &&
+    typeof initial.attributes === 'object' &&
+    !Array.isArray(initial.attributes) &&
+    typeof (initial.attributes as Record<string, unknown>).duree_incubation_jours === 'number'
+      ? String((initial.attributes as Record<string, number>).duree_incubation_jours)
+      : '';
+  const [dureeIncubation, setDureeIncubation] = useState(initialDuree);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -148,9 +160,25 @@ function SpeciesForm({
     setBusy(true);
     const trimmedName = name.trim();
     const trimmedCategory = category.trim();
+
+    // Fusionne avec les attributs existants pour ne pas écraser d'autres clés.
+    const existingAttrs: Record<string, unknown> =
+      initial?.attributes &&
+      typeof initial.attributes === 'object' &&
+      !Array.isArray(initial.attributes)
+        ? { ...(initial.attributes as Record<string, unknown>) }
+        : {};
+    const dureeNum = Number.parseInt(dureeIncubation, 10);
+    if (Number.isFinite(dureeNum) && dureeNum > 0) {
+      existingAttrs.duree_incubation_jours = dureeNum;
+    } else {
+      delete existingAttrs.duree_incubation_jours;
+    }
+
     const payload = {
       name: trimmedName,
       category: trimmedCategory === '' ? null : trimmedCategory,
+      attributes: existingAttrs as never,
     };
     const { error: dbError } = initial
       ? await supabase.from('species').update(payload).eq('id', initial.id)
@@ -192,16 +220,36 @@ function SpeciesForm({
           className="border border-neutral-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand"
         />
       </label>
-      <label className="flex flex-col gap-1.5">
-        <span className="text-sm font-medium text-neutral-700">Catégorie <span className="text-neutral-400 font-normal">(facultatif)</span></span>
-        <input
-          type="text"
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-          placeholder="volaille, poisson, ruminant…"
-          className="border border-neutral-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand"
-        />
-      </label>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-neutral-700">Catégorie <span className="text-neutral-400 font-normal">(facultatif)</span></span>
+          <input
+            type="text"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            placeholder="volaille, poisson, ruminant…"
+            className="border border-neutral-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand"
+          />
+        </label>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-neutral-700">
+            Durée d'incubation (jours) <span className="text-neutral-400 font-normal">(facultatif)</span>
+          </span>
+          <input
+            type="number"
+            min={1}
+            step={1}
+            inputMode="numeric"
+            value={dureeIncubation}
+            onChange={(e) => setDureeIncubation(e.target.value)}
+            placeholder="ex. 17 (cailles), 21 (poules), 28 (canards)"
+            className="border border-neutral-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand"
+          />
+          <span className="text-xs text-neutral-500">
+            Utilisée par le module Incubation pour calculer la date d'éclosion prévue.
+          </span>
+        </label>
+      </div>
       {error && (
         <div role="alert" className="text-sm bg-red-50 text-red-800 border border-red-200 rounded-lg px-3 py-2">
           {error}

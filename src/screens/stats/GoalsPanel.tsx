@@ -28,7 +28,13 @@ type Goal = Tables<'goals'>;
 // Métriques effectivement calculables au MVP. Toute autre métrique est listée
 // dans le formulaire mais marquée disabled — pas de saisie tant qu'on ne sait
 // pas la mesurer (cf. CLAUDE.md, P3 santé/objectifs pour le reste).
-const SUPPORTED_METRICS = ['production_oeufs', 'revenus', 'benefice', 'taux_mortalite'] as const;
+const SUPPORTED_METRICS = [
+  'production_oeufs',
+  'revenus',
+  'benefice',
+  'taux_mortalite',
+  'taux_eclosion',
+] as const;
 type SupportedMetric = (typeof SUPPORTED_METRICS)[number];
 
 const METRIC_LABEL: Record<SupportedMetric, string> = {
@@ -36,6 +42,7 @@ const METRIC_LABEL: Record<SupportedMetric, string> = {
   revenus: 'Revenus',
   benefice: 'Bénéfice',
   taux_mortalite: 'Taux de mortalité',
+  taux_eclosion: 'Taux d\u2019éclosion',
 };
 
 const METRIC_UNIT: Record<SupportedMetric, 'xof' | 'count' | 'percent'> = {
@@ -43,6 +50,7 @@ const METRIC_UNIT: Record<SupportedMetric, 'xof' | 'count' | 'percent'> = {
   revenus: 'xof',
   benefice: 'xof',
   taux_mortalite: 'percent',
+  taux_eclosion: 'percent',
 };
 
 // Métriques inversées : la cible est un MAXIMUM à ne pas dépasser, pas un
@@ -51,19 +59,17 @@ const INVERTED_METRICS: SupportedMetric[] = ['taux_mortalite'];
 
 // La projection linéaire (prorata temporis) suppose un flux régulier. Elle est
 // valide pour la ponte (rythme journalier ~stable) mais trompeuse pour les
-// métriques financières cumulées : un gros achat ponctuel d'aliment en début
-// de mois extrapole un déficit absurde à 30 jours. On la cache donc pour
-// revenus/bénéfice. Idem pour le taux de mortalité (taux instantané, pas un flux).
+// métriques financières cumulées et pour les taux instantanés.
 const SUPPORTS_LINEAR_PROJECTION: Record<SupportedMetric, boolean> = {
   production_oeufs: true,
   revenus: false,
   benefice: false,
   taux_mortalite: false,
+  taux_eclosion: false,
 };
 
 const FUTURE_METRICS: { key: string; label: string }[] = [
   { key: 'marge_par_lot', label: 'Marge par lot' },
-  { key: 'taux_eclosion', label: 'Taux d\u2019éclosion' },
 ];
 
 const SUPPORTED_PERIODS = ['mensuel'] as const;
@@ -112,6 +118,22 @@ async function fetchMetricActual(
       .is('deleted_at', null);
     if (error) return null;
     return (data ?? []).reduce((acc, r) => acc + r.quantity, 0);
+  }
+  if (metric === 'taux_eclosion') {
+    // Taux d'éclosion = SUM(hatched_count) / SUM(eggs_count) × 100
+    // sur les couvées TERMINÉES (eclos ou echoue) dont la set_date est dans la période.
+    const { data, error } = await supabase
+      .from('incubation_batches')
+      .select('eggs_count, hatched_count')
+      .gte('set_date', start)
+      .lte('set_date', end)
+      .in('status', ['eclos', 'echoue'])
+      .is('deleted_at', null);
+    if (error) return null;
+    const totalEggs = (data ?? []).reduce((s, r) => s + r.eggs_count, 0);
+    const totalHatched = (data ?? []).reduce((s, r) => s + (r.hatched_count ?? 0), 0);
+    if (totalEggs === 0) return 0;
+    return (totalHatched / totalEggs) * 100;
   }
   if (metric === 'taux_mortalite') {
     // Taux = SUM(mortalité sur la période) / SUM(initial_count des lots actifs) × 100.
