@@ -2,6 +2,12 @@ import { useState, type FormEvent } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Loader2, Mail, Lock, Sprout } from 'lucide-react';
 
+// Feature flag : permet de mettre l'inscription publique en sommeil sans rien
+// supprimer du code (handlers, traductions d'erreur, etc. restent fonctionnels).
+// Défaut = false. À passer à 'true' (string) côté .env.local ou Vercel pour
+// rouvrir l'écran d'inscription instantanément.
+const ALLOW_PUBLIC_SIGNUP = import.meta.env.VITE_ALLOW_PUBLIC_SIGNUP === 'true';
+
 type Mode = 'login' | 'signup';
 
 function translateAuthError(msg: string): string {
@@ -55,14 +61,19 @@ export function AuthScreen() {
           onSubmit={onSubmit}
           className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 flex flex-col gap-4"
         >
-          <div role="tablist" className="flex bg-neutral-100 rounded-xl p-1">
-            <TabButton active={mode === 'login'} onClick={() => { setMode('login'); setError(null); }}>
-              Connexion
-            </TabButton>
-            <TabButton active={mode === 'signup'} onClick={() => { setMode('signup'); setError(null); }}>
-              Créer un compte
-            </TabButton>
-          </div>
+          {/* Onglets affichés seulement si l'inscription publique est ouverte.
+              En sommeil, l'écran reste pure "Connexion" — le code signup
+              ci-dessous est intact, juste inaccessible via l'UI. */}
+          {ALLOW_PUBLIC_SIGNUP && (
+            <div role="tablist" className="flex bg-neutral-100 rounded-xl p-1">
+              <TabButton active={mode === 'login'} onClick={() => { setMode('login'); setError(null); }}>
+                Connexion
+              </TabButton>
+              <TabButton active={mode === 'signup'} onClick={() => { setMode('signup'); setError(null); }}>
+                Créer un compte
+              </TabButton>
+            </div>
+          )}
 
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-neutral-700">Email</span>

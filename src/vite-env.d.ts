@@ -6,6 +6,9 @@
 interface ImportMetaEnv {
   readonly VITE_SUPABASE_URL: string;
   readonly VITE_SUPABASE_ANON_KEY: string;
+  // Feature flag : 'true' pour rouvrir l'inscription publique côté UI.
+  // Optionnelle — absente ou ≠ 'true' = inscription en sommeil.
+  readonly VITE_ALLOW_PUBLIC_SIGNUP?: string;
 }
 
 interface ImportMeta {
