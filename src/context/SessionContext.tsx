@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -28,6 +29,10 @@ type SessionState =
 
 type SessionContextValue = SessionState & {
   signOut: () => Promise<void>;
+  // Permet à un écran (ex. Personnalisation) de pousser la nouvelle ligne
+  // organizations dans le contexte après UPDATE, et de réappliquer le
+  // branding sans recharger la page.
+  setOrganization: (org: Organization) => void;
 };
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -96,6 +101,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const setOrganization = useCallback((org: Organization) => {
+    applyBranding(org);
+    setState((prev) =>
+      prev.status === 'authenticated' ? { ...prev, organization: org } : prev,
+    );
+  }, []);
+
   const value = useMemo<SessionContextValue>(
     () => ({
       ...state,
@@ -103,8 +115,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         await supabase.auth.signOut();
         // onAuthStateChange repassera l'état à 'unauthenticated'.
       },
+      setOrganization,
     }),
-    [state],
+    [state, setOrganization],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

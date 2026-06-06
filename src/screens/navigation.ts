@@ -11,4 +11,5 @@ export type View =
   | 'finances'
   | 'health'
   | 'incubation'
-  | 'stats';
+  | 'stats'
+  | 'settings';
