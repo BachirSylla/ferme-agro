@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import {
   Palette,
   Type,
@@ -10,11 +10,56 @@ import {
   Loader2,
   Sprout,
   ShieldAlert,
+  Upload,
+  Trash2,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useSession } from '@/context/SessionContext';
 import { useToast } from '@/context/ToastContext';
 import { applyBranding } from '@/lib/branding';
+
+// ─── Traitement client de l'image ───────────────────────────
+// Recadre l'image en CARRÉ centré, la réduit à 256×256 et ré-encode en WebP
+// (quality 0.85). Sortie typique 5–30 Ko quelle que soit la taille d'entrée.
+// On utilise Canvas natif — pas de dépendance image.
+const LOGO_SIZE_PX = 256;
+const MAX_INPUT_BYTES = 10 * 1024 * 1024; // 10 Mo garde-fou avant traitement
+const LOGO_BUCKET = 'logos';
+
+async function processImageToSquare(file: File): Promise<Blob> {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const minDim = Math.min(bitmap.width, bitmap.height);
+    const sx = (bitmap.width - minDim) / 2;
+    const sy = (bitmap.height - minDim) / 2;
+    const canvas = document.createElement('canvas');
+    canvas.width = LOGO_SIZE_PX;
+    canvas.height = LOGO_SIZE_PX;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas indisponible sur cet appareil.');
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(bitmap, sx, sy, minDim, minDim, 0, 0, LOGO_SIZE_PX, LOGO_SIZE_PX);
+    return await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => (blob ? resolve(blob) : reject(new Error('Encodage WebP échoué.'))),
+        'image/webp',
+        0.85,
+      );
+    });
+  } finally {
+    // ImageBitmap occupe de la VRAM tant qu'on ne ferme pas.
+    bitmap.close?.();
+  }
+}
+
+// Extrait le path dans le bucket à partir d'une URL publique
+// (incluant un éventuel ?t=cache-bust).
+function extractStoragePath(publicUrl: string): string | null {
+  const m = publicUrl.match(
+    new RegExp(`\\/object\\/public\\/${LOGO_BUCKET}\\/(.+?)(\\?.*)?$`),
+  );
+  return m ? m[1] : null;
+}
 
 // Palette curée — 16 couleurs profondes garantissant un bon contraste avec
 // du texte blanc (--brand-fg-rgb par défaut = 255 255 255).
@@ -57,6 +102,9 @@ export function PersonnalisationScreen() {
   const [color, setColor] = useState(organization.color_primary);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [logoError, setLogoError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Le snapshot d'origine reste figé pour pouvoir restaurer le branding
   // au démontage si l'utilisateur quitte sans sauver.
@@ -127,6 +175,101 @@ export function PersonnalisationScreen() {
     setSlogan(originalOrgRef.current.slogan ?? '');
     setColor(originalOrgRef.current.color_primary);
     setError(null);
+  }
+
+  // ─── Logo : upload + suppression ─────────────────────────
+  async function onLogoFileChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    // Reset l'input pour pouvoir re-sélectionner le même fichier après échec.
+    e.target.value = '';
+    if (!file) return;
+    setLogoError(null);
+
+    if (!file.type.startsWith('image/')) {
+      setLogoError('Fichier non reconnu comme image (formats acceptés : JPG, PNG, WebP…).');
+      return;
+    }
+    if (file.size > MAX_INPUT_BYTES) {
+      setLogoError('Image trop volumineuse (>10 Mo). Choisissez une image plus petite.');
+      return;
+    }
+
+    setUploadingLogo(true);
+    try {
+      const blob = await processImageToSquare(file);
+      const path = `${organization.id}/logo.webp`;
+      const { error: upErr } = await supabase.storage
+        .from(LOGO_BUCKET)
+        .upload(path, blob, {
+          upsert: true,
+          contentType: 'image/webp',
+          cacheControl: '31536000', // l'URL change via ?t=…, les anciennes peuvent expirer
+        });
+      if (upErr) throw new Error(`Envoi : ${upErr.message}`);
+
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from(LOGO_BUCKET).getPublicUrl(path);
+      // Cache-bust : permet au navigateur de récupérer la nouvelle version
+      // alors que le path en stockage reste fixe (utile pour upsert).
+      const urlWithBust = `${publicUrl}?t=${Date.now()}`;
+
+      const { data: updated, error: dbErr } = await supabase
+        .from('organizations')
+        .update({ logo_url: urlWithBust })
+        .eq('id', organization.id)
+        .select()
+        .single();
+      if (dbErr || !updated) throw new Error(`Enregistrement : ${dbErr?.message ?? 'inconnu'}`);
+
+      setOrganization(updated);
+      // setOrganization a relancé applyBranding avec la couleur de la DB :
+      // si l'utilisateur prévisualisait une autre couleur (non sauvée), on la
+      // ré-applique pour ne pas casser sa session d'aperçu.
+      applyBranding({ color_primary: color });
+      toast.push('success', 'Logo mis à jour.');
+    } catch (err) {
+      setLogoError(err instanceof Error ? err.message : 'Erreur inconnue.');
+    } finally {
+      setUploadingLogo(false);
+    }
+  }
+
+  async function removeLogo() {
+    if (!organization.logo_url) return;
+    setLogoError(null);
+    setUploadingLogo(true);
+    try {
+      const path = extractStoragePath(organization.logo_url);
+      if (path) {
+        const { error: rmErr } = await supabase.storage.from(LOGO_BUCKET).remove([path]);
+        // Si le fichier est déjà absent côté storage, on continue : ce qui
+        // compte, c'est remettre logo_url à null en DB.
+        if (rmErr && !/not.?found/i.test(rmErr.message)) {
+          throw new Error(`Suppression du fichier : ${rmErr.message}`);
+        }
+      }
+
+      const { data: updated, error: dbErr } = await supabase
+        .from('organizations')
+        .update({ logo_url: null })
+        .eq('id', organization.id)
+        .select()
+        .single();
+      if (dbErr || !updated) throw new Error(`Enregistrement : ${dbErr?.message ?? 'inconnu'}`);
+
+      setOrganization(updated);
+      applyBranding({ color_primary: color });
+      toast.push('success', 'Logo retiré.');
+    } catch (err) {
+      setLogoError(err instanceof Error ? err.message : 'Erreur inconnue.');
+    } finally {
+      setUploadingLogo(false);
+    }
+  }
+
+  function pickFile() {
+    fileInputRef.current?.click();
   }
 
   if (!canEdit) {
@@ -281,7 +424,7 @@ export function PersonnalisationScreen() {
         </label>
       </section>
 
-      {/* ─── Logo (lecture seule pour l'instant) ─── */}
+      {/* ─── Logo ─── */}
       <section className="rounded-2xl bg-white border border-neutral-200 shadow-sm p-4 flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <span className="h-7 w-7 rounded-lg bg-brand/10 text-brand grid place-items-center">
@@ -289,28 +432,79 @@ export function PersonnalisationScreen() {
           </span>
           <h2 className="font-semibold text-neutral-800">Logo</h2>
         </div>
-        {organization.logo_url ? (
-          <div className="flex items-center gap-3">
+
+        <div className="flex items-start gap-3">
+          {/* Aperçu : carré 80×80, ou placeholder. */}
+          {organization.logo_url ? (
             <img
               src={organization.logo_url}
               alt="Logo actuel"
-              className="h-16 w-16 rounded-xl object-cover border border-neutral-200"
+              className="h-20 w-20 rounded-xl object-cover border border-neutral-200 shrink-0 bg-neutral-50"
             />
-            <div className="text-sm text-neutral-600">
-              <div className="font-medium text-neutral-800">Logo actuel</div>
-              <div className="text-xs text-neutral-500">
-                L'édition / téléversement arrive avec le module Stockage.
-              </div>
+          ) : (
+            <div className="h-20 w-20 rounded-xl border border-dashed border-neutral-300 bg-neutral-50 grid place-items-center text-neutral-400 shrink-0">
+              <ImageIcon className="h-7 w-7" />
             </div>
+          )}
+
+          <div className="flex-1 min-w-0">
+            <div className="font-medium text-sm text-neutral-800">
+              {organization.logo_url ? 'Logo actuel' : 'Pas encore de logo'}
+            </div>
+            <p className="text-xs text-neutral-500 mt-0.5">
+              {organization.logo_url
+                ? 'Optimisé en 256 × 256 px (WebP).'
+                : "L'initiale du nom de la ferme s'affiche dans l'en-tête en attendant."}
+            </p>
+
+            <div className="flex flex-wrap gap-2 mt-3">
+              <button
+                type="button"
+                onClick={pickFile}
+                disabled={uploadingLogo}
+                className="text-sm bg-brand text-brand-fg rounded-lg px-3 py-1.5 font-medium hover:opacity-95 disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1.5 shadow-sm"
+              >
+                {uploadingLogo ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Upload className="h-4 w-4" />
+                )}
+                {uploadingLogo
+                  ? 'Traitement…'
+                  : organization.logo_url
+                    ? 'Remplacer le logo'
+                    : 'Choisir un logo'}
+              </button>
+              {organization.logo_url && (
+                <button
+                  type="button"
+                  onClick={() => void removeLogo()}
+                  disabled={uploadingLogo}
+                  className="text-sm text-red-700 hover:text-red-900 px-3 py-1.5 rounded-lg hover:bg-red-50 disabled:opacity-40 flex items-center gap-1.5 border border-red-200"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Retirer
+                </button>
+              )}
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => void onLogoFileChange(e)}
+            />
           </div>
-        ) : (
-          <div className="rounded-xl border border-dashed border-neutral-300 bg-neutral-50/60 p-4 text-center">
-            <div className="text-sm text-neutral-600">
-              Pas encore de logo. <span className="text-neutral-400">Téléversement à venir.</span>
-            </div>
-            <div className="text-xs text-neutral-400 mt-1">
-              En attendant, l'initiale du nom de la ferme s'affiche sur l'en-tête.
-            </div>
+        </div>
+
+        <p className="text-xs text-neutral-500">
+          L'image est <strong>recadrée en carré</strong> (centrée), réduite à 256 × 256 px
+          et optimisée automatiquement avant l'envoi. Connexion lente : pas de souci.
+        </p>
+
+        {logoError && (
+          <div role="alert" className="text-xs bg-red-50 text-red-800 border border-red-200 rounded-lg px-3 py-2">
+            {logoError}
           </div>
         )}
       </section>
