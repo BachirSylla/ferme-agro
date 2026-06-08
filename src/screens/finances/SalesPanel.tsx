@@ -18,9 +18,10 @@ import {
   PAYMENT_CLASS,
   PAYMENT_LABEL,
   dateShortFmt,
+  formatFCFA,
+  formatNumberFr,
   qtyFmt,
   todayIso,
-  xofFmt,
 } from '@/lib/format';
 import type { Enums, Tables } from '@/types/db';
 
@@ -196,7 +197,7 @@ export function SalesPanel() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium truncate">
-                        {xofFmt.format(s.total)} FCFA
+                        {formatFCFA(s.total)}
                       </span>
                       <PaymentBadge method={s.payment_method} />
                       {status && <StatusBadge status={status} />}
@@ -401,7 +402,7 @@ function SaleForm({
     }
 
     setBusy(false);
-    toast.push('success', `Vente de ${xofFmt.format(total)} FCFA enregistrée.`);
+    toast.push('success', `Vente de ${formatFCFA(total)} enregistrée.`);
     onSaved();
   }
 
@@ -551,12 +552,12 @@ function SaleForm({
                           className="w-full border border-neutral-300 rounded-lg px-2 py-1.5 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand"
                         />
                         <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-neutral-500 font-medium">
-                          XOF
+                          FCFA
                         </span>
                       </div>
                     </label>
                     <div className="text-xs text-neutral-700 font-medium pb-1.5 whitespace-nowrap">
-                      = {xofFmt.format(lineTotals[idx])}
+                      = {formatNumberFr(lineTotals[idx])}
                     </div>
                   </div>
                 </div>
@@ -569,7 +570,7 @@ function SaleForm({
       <div className="flex items-center justify-between border-t border-neutral-200 pt-3">
         <span className="text-sm text-neutral-700">Total</span>
         <span className="text-lg font-semibold">
-          {xofFmt.format(isEdit ? initial!.sale.total : total)} FCFA
+          {formatFCFA(isEdit ? initial!.sale.total : total)}
         </span>
       </div>
 
@@ -631,16 +632,16 @@ function ReadOnlyItems({
                 {product?.name ?? 'Produit inconnu'}{' '}
                 <span className="text-neutral-500">
                   · {qtyFmt.format(it.quantity)} {product?.unit ?? ''} ×{' '}
-                  {xofFmt.format(it.unit_price)}
+                  {formatNumberFr(it.unit_price)}
                 </span>
               </span>
-              <span className="font-medium whitespace-nowrap">{xofFmt.format(line)}</span>
+              <span className="font-medium whitespace-nowrap">{formatNumberFr(line)}</span>
             </li>
           );
         })}
       </ul>
       <div className="text-xs text-neutral-500 text-right">
-        Total figé à {xofFmt.format(total)} FCFA
+        Total figé à {formatFCFA(total)}
       </div>
     </div>
   );

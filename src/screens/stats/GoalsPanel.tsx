@@ -19,7 +19,7 @@ import {
   lastOfMonthIso,
   percentFmt,
   qtyFmt,
-  xofFmt,
+  formatFCFA,
 } from '@/lib/format';
 import type { Tables } from '@/types/db';
 
@@ -81,7 +81,7 @@ const PERIOD_LABEL: Record<SupportedPeriod, string> = {
 
 function formatValue(metric: SupportedMetric, value: number): string {
   const unit = METRIC_UNIT[metric];
-  if (unit === 'xof') return `${xofFmt.format(value)} FCFA`;
+  if (unit === 'xof') return formatFCFA(value);
   if (unit === 'percent') return `${percentFmt.format(value)} %`;
   return qtyFmt.format(value);
 }

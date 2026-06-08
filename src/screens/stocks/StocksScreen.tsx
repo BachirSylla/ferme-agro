@@ -17,7 +17,7 @@ import { supabase } from '@/lib/supabase';
 import { useSession } from '@/context/SessionContext';
 import { useToast } from '@/context/ToastContext';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { dateShortFmt, qtyFmt, todayIso, xofFmt } from '@/lib/format';
+import { dateShortFmt, formatFCFA, formatNumberFr, qtyFmt, todayIso } from '@/lib/format';
 import type { Enums, Tables } from '@/types/db';
 
 type StockItem = Tables<'stock_items'>;
@@ -305,7 +305,7 @@ function ItemCard({
               {stats.avgCost > 0 && (
                 <>
                   <span>·</span>
-                  <span>coût moyen ~{xofFmt.format(Math.round(stats.avgCost))} FCFA/{item.unit}</span>
+                  <span>coût moyen ~{formatNumberFr(Math.round(stats.avgCost))} FCFA/{item.unit}</span>
                 </>
               )}
             </div>
@@ -440,12 +440,12 @@ function MovementsList({
                   {isEntree ? (
                     <>
                       <span>·</span>
-                      <span>{xofFmt.format(m.cost)} FCFA <em>(achat — cash sortant)</em></span>
+                      <span>{formatFCFA(m.cost)} <em>(achat — cash sortant)</em></span>
                     </>
                   ) : lot ? (
                     <>
                       <span>·</span>
-                      <span>{xofFmt.format(m.cost)} FCFA <em>(imputé au lot, pas de cash)</em></span>
+                      <span>{formatFCFA(m.cost)} <em>(imputé au lot, pas de cash)</em></span>
                     </>
                   ) : (
                     <>
@@ -727,7 +727,7 @@ function PurchaseForm({
     }
 
     setBusy(false);
-    toast.push('success', `Achat enregistré : +${qty} ${item.unit} et dépense de ${xofFmt.format(cost)} FCFA.`);
+    toast.push('success', `Achat enregistré : +${qty} ${item.unit} et dépense de ${formatFCFA(cost)}.`);
     onSaved();
   }
 
@@ -919,7 +919,7 @@ function SortieForm({
     toast.push(
       'success',
       isToLot
-        ? `Sortie ${qty} ${item.unit} → coût ${xofFmt.format(cst)} FCFA imputé au lot.`
+        ? `Sortie ${qty} ${item.unit} → coût ${formatFCFA(cst)} imputé au lot.`
         : `Sortie ${qty} ${item.unit} enregistrée.`,
     );
     onSaved();
@@ -1004,7 +1004,7 @@ function SortieForm({
           </div>
           {avgCost > 0 && !costEdited && (
             <span className="text-xs text-neutral-500">
-              Pré-rempli à partir du coût moyen ({xofFmt.format(Math.round(avgCost))} FCFA/{item.unit}).
+              Pré-rempli à partir du coût moyen ({formatNumberFr(Math.round(avgCost))} FCFA/{item.unit}).
             </span>
           )}
         </label>

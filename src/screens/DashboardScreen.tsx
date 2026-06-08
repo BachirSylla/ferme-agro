@@ -14,9 +14,10 @@ import {
   PAYMENT_CLASS,
   PAYMENT_LABEL,
   dateShortFmt,
+  formatFCFA,
+  formatNumberFr,
   qtyFmt,
   todayIso,
-  xofFmt,
 } from '@/lib/format';
 import type { Enums, Tables, Views } from '@/types/db';
 import type { View } from './navigation';
@@ -236,7 +237,7 @@ function KpiCard({
         <div className="h-7 w-24 bg-neutral-200 rounded animate-pulse mt-2" />
       ) : (
         <div className={`text-2xl font-semibold tracking-tight mt-1 ${valueClass}`}>
-          {xofFmt.format(value)}
+          {formatNumberFr(value)}
           <span className="text-sm font-medium text-neutral-400 ml-1">FCFA</span>
         </div>
       )}
@@ -368,8 +369,7 @@ function LotsCard({
             >
               <span className="font-medium truncate">{l.code ?? '—'}</span>
               <span className="text-xs text-neutral-500 whitespace-nowrap">
-                {qtyFmt.format(l.total_produit ?? 0)} produit · {xofFmt.format(l.cout_total ?? 0)}{' '}
-                FCFA
+                {qtyFmt.format(l.total_produit ?? 0)} produit · {formatFCFA(l.cout_total ?? 0)}
               </span>
             </li>
           ))}
@@ -413,7 +413,7 @@ function RecentSalesCard({
               <span className="text-xs text-neutral-500 whitespace-nowrap">
                 {dateShortFmt.format(new Date(s.day))}
               </span>
-              <span className="font-medium truncate">{xofFmt.format(s.total)} FCFA</span>
+              <span className="font-medium truncate">{formatFCFA(s.total)}</span>
               <PaymentBadge method={s.payment_method} />
             </li>
           ))}

@@ -8,8 +8,8 @@ import {
   PAYMENT_CLASS,
   PAYMENT_LABEL,
   dateShortFmt,
+  formatFCFA,
   todayIso,
-  xofFmt,
 } from '@/lib/format';
 import type { Enums, Tables } from '@/types/db';
 
@@ -83,7 +83,7 @@ export function ExpensesPanel() {
         <div className="text-sm text-neutral-600">
           {expenses === null
             ? 'Chargement…'
-            : `${expenses.length} dépense${expenses.length > 1 ? 's' : ''} · total ${xofFmt.format(totalSum)} FCFA`}
+            : `${expenses.length} dépense${expenses.length > 1 ? 's' : ''} · total ${formatFCFA(totalSum)}`}
         </div>
         {form.mode === 'closed' && (
           <button
@@ -136,7 +136,7 @@ export function ExpensesPanel() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium truncate">
-                        {xofFmt.format(e.amount)} FCFA
+                        {formatFCFA(e.amount)}
                       </span>
                       <PaymentBadge method={e.payment_method} />
                     </div>

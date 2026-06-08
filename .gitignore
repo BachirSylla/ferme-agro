@@ -12,6 +12,9 @@ dev-dist
 *.tsbuildinfo
 .eslintcache
 
+# Sorties locales de scripts de test (PDF générés, PNG de prévisualisation…)
+tmp/
+
 # Config locale de Claude Code (permissions/outils par machine)
 .claude/
 

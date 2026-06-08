@@ -15,7 +15,7 @@ import { supabase } from '@/lib/supabase';
 import { useSession } from '@/context/SessionContext';
 import { useToast } from '@/context/ToastContext';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { dateShortFmt, qtyFmt, todayIso, xofFmt } from '@/lib/format';
+import { dateShortFmt, formatFCFA, qtyFmt, todayIso } from '@/lib/format';
 import type { Enums, Tables } from '@/types/db';
 
 type HealthRecord = Tables<'health_records'>;
@@ -209,7 +209,7 @@ export function HealthScreen() {
                         <>
                           <span>·</span>
                           <span className="font-medium text-neutral-700">
-                            {xofFmt.format(r.cost)} FCFA
+                            {formatFCFA(r.cost)}
                           </span>
                         </>
                       )}

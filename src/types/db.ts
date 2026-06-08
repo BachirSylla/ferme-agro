@@ -4,7 +4,7 @@
 // Reproduit la forme de `supabase gen types typescript`. Quand tu installeras
 // la CLI plus tard, régénère pour récupérer les Relationships complètes (joins
 // typés) ; les requêtes simples sont déjà entièrement typées ici.
-// NB : montants en XOF = number entiers ; dates = string (ISO 'YYYY-MM-DD').
+// NB : montants en FCFA (code ISO 'XOF') = number entiers ; dates = string (ISO 'YYYY-MM-DD').
 
 export type Json =
   | string

@@ -11,9 +11,10 @@ import {
   Tooltip,
   Legend,
 } from 'recharts';
-import { ChevronLeft, ChevronRight, LineChart as LineIcon, BarChart3 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, LineChart as LineIcon, BarChart3, FileDown, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useSession } from '@/context/SessionContext';
+import { useToast } from '@/context/ToastContext';
 import {
   abbreviateXof,
   addMonthsIso,
@@ -22,7 +23,8 @@ import {
   monthLongLabel,
   monthShortLabel,
   qtyFmt,
-  xofFmt,
+  formatFCFA,
+  formatNumberFr,
 } from '@/lib/format';
 import type { Enums, Views } from '@/types/db';
 
@@ -83,9 +85,37 @@ type ProdPoint = {
 export function EvolutionPanel() {
   const session = useSession();
   if (session.status !== 'authenticated') return null;
+  const toast = useToast();
 
   const [mode, setMode] = useState<Mode>('range12');
   const [cursor, setCursor] = useState<string>(firstOfMonthIso());
+  const [exporting, setExporting] = useState(false);
+
+  // Mois exporté : si on est en "Mois précis", c'est le cursor sélectionné ;
+  // sinon (range), on prend le mois en cours pour ne pas surprendre l'utilisateur.
+  const exportMonth = mode === 'navigate' ? cursor : firstOfMonthIso();
+
+  async function onExportPdf() {
+    if (session.status !== 'authenticated') return;
+    setExporting(true);
+    try {
+      // Import dynamique : le bundle jsPDF + autoTable n'arrive qu'au premier
+      // clic, dans son propre chunk Vite.
+      const { generateMonthlyReport } = await import('@/lib/pdf/generateMonthlyReport');
+      await generateMonthlyReport({
+        organization: session.organization,
+        monthIso: exportMonth,
+      });
+      toast.push('success', 'Rapport téléchargé.');
+    } catch (err) {
+      toast.push(
+        'error',
+        `Échec de l'export : ${err instanceof Error ? err.message : 'inconnu'}`,
+      );
+    } finally {
+      setExporting(false);
+    }
+  }
 
   const months = useMemo<string[]>(() => {
     if (mode === 'navigate') return [cursor];
@@ -214,6 +244,27 @@ export function EvolutionPanel() {
   return (
     <div className="flex flex-col gap-5">
       <PeriodSelector mode={mode} setMode={setMode} cursor={cursor} setCursor={setCursor} />
+
+      <div className="flex">
+        <button
+          type="button"
+          onClick={() => void onExportPdf()}
+          disabled={exporting}
+          className="ml-auto text-sm bg-brand text-brand-fg rounded-lg px-3 py-1.5 font-medium hover:opacity-95 disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1.5 shadow-sm"
+        >
+          {exporting ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <FileDown className="h-4 w-4" />
+          )}
+          <span className="hidden sm:inline">
+            {exporting ? 'Génération du PDF…' : `Exporter ${monthLongLabel(exportMonth)} en PDF`}
+          </span>
+          <span className="sm:hidden">
+            {exporting ? 'Génération…' : 'Exporter PDF'}
+          </span>
+        </button>
+      </div>
 
       {error && (
         <div role="alert" className="text-sm bg-red-50 text-red-800 border border-red-200 rounded-lg px-3 py-2">
@@ -394,7 +445,7 @@ function FinancialTooltip({ active, payload, label }: TooltipContentProps) {
             <span className="text-neutral-600">{p.name}</span>
           </div>
           <span className="font-medium text-neutral-900">
-            {xofFmt.format(Number(p.value ?? 0))} FCFA
+            {formatFCFA(Number(p.value ?? 0))}
           </span>
         </div>
       ))}
@@ -445,15 +496,15 @@ function MonthlyTable({
           {rows.map((r) => (
             <tr key={r.mois}>
               <td className="py-2 px-2 capitalize whitespace-nowrap">{r.label}</td>
-              <td className="py-2 px-2 text-right tabular-nums">{xofFmt.format(r.revenus)}</td>
-              <td className="py-2 px-2 text-right tabular-nums">{xofFmt.format(r.depenses)}</td>
+              <td className="py-2 px-2 text-right tabular-nums">{formatNumberFr(r.revenus)}</td>
+              <td className="py-2 px-2 text-right tabular-nums">{formatNumberFr(r.depenses)}</td>
               <td
                 className={
                   'py-2 px-2 text-right tabular-nums font-medium ' +
                   (r.benefice > 0 ? 'text-emerald-700' : r.benefice < 0 ? 'text-red-700' : 'text-neutral-700')
                 }
               >
-                {xofFmt.format(r.benefice)}
+                {formatNumberFr(r.benefice)}
               </td>
               <td className="py-2 px-2 text-right tabular-nums text-neutral-700">{qtyFmt.format(r.production)}</td>
             </tr>

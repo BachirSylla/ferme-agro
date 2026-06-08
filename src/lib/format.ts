@@ -3,6 +3,25 @@ import type { Enums } from '@/types/db';
 
 export const xofFmt = new Intl.NumberFormat('fr-FR');
 export const qtyFmt = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 3 });
+
+// Intl.NumberFormat('fr-FR') sort une espace insécable étroite U+202F comme
+// séparateur de milliers. Le DOM la rend correctement, mais la Helvetica
+// standard de jsPDF (WinAnsi) ne la contient pas → elle s'affiche en "/" ou
+// autre glyphe. On normalise sur une espace standard U+0020 pour rester
+// safe partout (PDF + DOM identiques).
+export function formatNumberFr(n: number): string {
+  return Math.round(n).toLocaleString('fr-FR').replace(/[\u00A0\u202F]/g, ' ');
+}
+
+export function formatQty(n: number): string {
+  return n.toLocaleString('fr-FR', { maximumFractionDigits: 3 }).replace(/[\u00A0\u202F]/g, ' ');
+}
+
+// Format unique des montants — un seul helper réutilisé par toute l'app et
+// par l'export PDF. Sortie : "29 000 FCFA".
+export function formatFCFA(n: number): string {
+  return `${formatNumberFr(n)} FCFA`;
+}
 export const percentFmt = new Intl.NumberFormat('fr-FR', {
   minimumFractionDigits: 1,
   maximumFractionDigits: 1,
@@ -30,6 +49,13 @@ export function formatDayLabel(day: string): string {
 export const dateShortFmt = new Intl.DateTimeFormat('fr-FR', {
   day: '2-digit',
   month: 'short',
+  year: 'numeric',
+});
+
+// Date 100% numérique pour pieds de PDF, slugs, etc. — "08/06/2026".
+export const dateNumericFmt = new Intl.DateTimeFormat('fr-FR', {
+  day: '2-digit',
+  month: '2-digit',
   year: 'numeric',
 });
 
