@@ -461,6 +461,7 @@ export interface Database {
           org_id: string;
           sale_id: string;
           product_id: string;
+          lot_id: string | null;
           quantity: number;
           unit_price: number;
         } & Timestamps;
@@ -469,6 +470,7 @@ export interface Database {
           org_id: string;
           sale_id: string;
           product_id: string;
+          lot_id?: string | null;
           quantity?: number;
           unit_price?: number;
           created_at?: string;
@@ -480,6 +482,7 @@ export interface Database {
           org_id?: string;
           sale_id?: string;
           product_id?: string;
+          lot_id?: string | null;
           quantity?: number;
           unit_price?: number;
           created_at?: string;
@@ -581,6 +584,8 @@ export interface Database {
           cout_intrants: number | null;
           cout_sante: number | null;
           cout_total: number | null;
+          revenu_rattache: number | null;
+          marge: number | null;
         };
         Relationships: [];
       };

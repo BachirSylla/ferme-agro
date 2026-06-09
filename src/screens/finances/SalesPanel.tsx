@@ -45,7 +45,16 @@ const STATUS_CLASS: Record<SaleStatus, string> = {
   partielle: 'bg-amber-100 text-amber-800 border-amber-200',
 };
 
-type ItemDraft = { product_id: string; quantity: string; unit_price: string };
+type ItemDraft = {
+  product_id: string;
+  quantity: string;
+  unit_price: string;
+  // lot_id : facultatif. Permet le calcul de marge par lot (v_lot_overview).
+  // '' = pas de rattachement. Pour les produits sans species (négoce), le
+  // sélecteur n'est même pas affiché.
+  lot_id: string;
+};
+type Lot = Tables<'lots'>;
 
 type FormState =
   | { mode: 'closed' }
@@ -61,12 +70,16 @@ export function SalesPanel() {
   const [itemsBySale, setItemsBySale] = useState<Map<string, SaleItem[]>>(new Map());
   const [productsById, setProductsById] = useState<Map<string, Product>>(new Map());
   const [customers, setCustomers] = useState<Customer[]>([]);
+  // Lots actifs : nécessaires pour le sélecteur "Lot d'origine" par ligne
+  // de vente. Filtrés par species_id du produit (côté form), pour ne pas
+  // proposer un lot de cailles avec une vente de miel.
+  const [activeLots, setActiveLots] = useState<Lot[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>({ mode: 'closed' });
 
   const refresh = useCallback(async () => {
     setLoadError(null);
-    const [salesRes, itemsRes, prRes, cuRes] = await Promise.all([
+    const [salesRes, itemsRes, prRes, cuRes, lotsRes] = await Promise.all([
       supabase
         .from('sales')
         .select('*')
@@ -84,13 +97,20 @@ export function SalesPanel() {
         .select('*')
         .is('deleted_at', null)
         .order('name', { ascending: true }),
+      supabase
+        .from('lots')
+        .select('*')
+        .eq('status', 'actif')
+        .is('deleted_at', null)
+        .order('code', { ascending: true }),
     ]);
-    if (salesRes.error || itemsRes.error || prRes.error || cuRes.error) {
+    if (salesRes.error || itemsRes.error || prRes.error || cuRes.error || lotsRes.error) {
       setLoadError(
         salesRes.error?.message ??
           itemsRes.error?.message ??
           prRes.error?.message ??
           cuRes.error?.message ??
+          lotsRes.error?.message ??
           'erreur',
       );
       setSales([]);
@@ -106,6 +126,7 @@ export function SalesPanel() {
     setItemsBySale(map);
     setProductsById(new Map(prRes.data.map((p) => [p.id, p])));
     setCustomers(cuRes.data);
+    setActiveLots(lotsRes.data ?? []);
   }, []);
 
   useEffect(() => {
@@ -155,6 +176,7 @@ export function SalesPanel() {
           products={products}
           productsById={productsById}
           customers={customers}
+          activeLots={activeLots}
           initial={form.mode === 'edit' ? { sale: form.sale, items: form.items } : null}
           onClose={() => setForm({ mode: 'closed' })}
           onCustomerCreated={(c) => setCustomers((cs) => [...cs, c].sort((a, b) => a.name.localeCompare(b.name)))}
@@ -245,6 +267,7 @@ function SaleForm({
   products,
   productsById,
   customers,
+  activeLots,
   initial,
   onClose,
   onSaved,
@@ -254,6 +277,7 @@ function SaleForm({
   products: Product[];
   productsById: Map<string, Product>;
   customers: Customer[];
+  activeLots: Lot[];
   initial: { sale: Sale; items: SaleItem[] } | null;
   onClose: () => void;
   onSaved: () => void;
@@ -276,8 +300,9 @@ function SaleForm({
           product_id: i.product_id,
           quantity: String(i.quantity),
           unit_price: String(i.unit_price),
+          lot_id: i.lot_id ?? '',
         }))
-      : [{ product_id: '', quantity: '1', unit_price: '0' }],
+      : [{ product_id: '', quantity: '1', unit_price: '0', lot_id: '' }],
   );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -293,11 +318,14 @@ function SaleForm({
       // Pré-remplit le prix unitaire avec le default_price du produit (sauf en édition,
       // pour ne pas écraser un prix négocié manuellement).
       unit_price: product && !isEdit ? String(product.default_price) : items[idx].unit_price,
+      // Reset le lot quand le produit change : un lot rattaché à un produit
+      // d'une autre espèce n'aurait plus de sens.
+      lot_id: '',
     });
   }
 
   function addItem() {
-    setItems((arr) => [...arr, { product_id: '', quantity: '1', unit_price: '0' }]);
+    setItems((arr) => [...arr, { product_id: '', quantity: '1', unit_price: '0', lot_id: '' }]);
   }
 
   function removeItem(idx: number) {
@@ -339,7 +367,12 @@ function SaleForm({
     }
 
     // ─── Création : valider + insertion atomique au mieux ──
-    const cleanedItems: { product_id: string; quantity: number; unit_price: number }[] = [];
+    const cleanedItems: {
+      product_id: string;
+      quantity: number;
+      unit_price: number;
+      lot_id: string | null;
+    }[] = [];
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
       const q = Number.parseFloat(it.quantity.replace(',', '.'));
@@ -356,7 +389,12 @@ function SaleForm({
         setError(`Ligne ${i + 1} : prix invalide.`);
         return;
       }
-      cleanedItems.push({ product_id: it.product_id, quantity: q, unit_price: p });
+      cleanedItems.push({
+        product_id: it.product_id,
+        quantity: q,
+        unit_price: p,
+        lot_id: it.lot_id === '' ? null : it.lot_id,
+      });
     }
     if (cleanedItems.length === 0) {
       setError('Ajoutez au moins une ligne.');
@@ -387,6 +425,7 @@ function SaleForm({
         product_id: it.product_id,
         quantity: it.quantity,
         unit_price: it.unit_price,
+        lot_id: it.lot_id,
       })),
     );
 
@@ -475,6 +514,7 @@ function SaleForm({
         <ReadOnlyItems
           items={initial!.items}
           productsById={productsById}
+          lotsById={new Map(activeLots.map((l) => [l.id, l]))}
           total={initial!.sale.total}
         />
       ) : (
@@ -560,6 +600,33 @@ function SaleForm({
                       = {formatNumberFr(lineTotals[idx])}
                     </div>
                   </div>
+                  {/* Sélecteur de lot d'origine, facultatif. Masqué si le produit
+                      n'a pas d'espèce (négoce) ou s'il n'existe aucun lot actif
+                      pertinent. Pas obligatoire : '' = vente non rattachée. */}
+                  {(() => {
+                    if (!product?.species_id) return null;
+                    const relevantLots = activeLots.filter(
+                      (l) => l.species_id === product.species_id,
+                    );
+                    if (relevantLots.length === 0) return null;
+                    return (
+                      <label className="flex flex-col gap-1 text-xs text-neutral-600">
+                        Lot d'origine <span className="text-neutral-400 font-normal">(facultatif)</span>
+                        <select
+                          value={it.lot_id}
+                          onChange={(e) => updateItem(idx, { lot_id: e.target.value })}
+                          className="border border-neutral-300 rounded-lg px-2 py-1.5 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand"
+                        >
+                          <option value="">— Pas de rattachement</option>
+                          {relevantLots.map((l) => (
+                            <option key={l.id} value={l.id}>
+                              {l.code}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    );
+                  })()}
                 </div>
               );
             })}
@@ -613,10 +680,12 @@ function SaleForm({
 function ReadOnlyItems({
   items,
   productsById,
+  lotsById,
   total,
 }: {
   items: SaleItem[];
   productsById: Map<string, Product>;
+  lotsById: Map<string, Lot>;
   total: number;
 }) {
   return (
@@ -626,6 +695,7 @@ function ReadOnlyItems({
         {items.map((it) => {
           const product = productsById.get(it.product_id);
           const line = Math.round(it.quantity * it.unit_price);
+          const lot = it.lot_id ? lotsById.get(it.lot_id) : null;
           return (
             <li key={it.id} className="p-2.5 flex items-center justify-between gap-3 text-sm">
               <span className="truncate">
@@ -634,6 +704,11 @@ function ReadOnlyItems({
                   · {qtyFmt.format(it.quantity)} {product?.unit ?? ''} ×{' '}
                   {formatNumberFr(it.unit_price)}
                 </span>
+                {lot && (
+                  <span className="ml-1 inline-flex items-center text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded-md border bg-brand/10 text-brand border-brand/20">
+                    → {lot.code}
+                  </span>
+                )}
               </span>
               <span className="font-medium whitespace-nowrap">{formatNumberFr(line)}</span>
             </li>

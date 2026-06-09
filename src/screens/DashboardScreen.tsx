@@ -362,22 +362,50 @@ function LotsCard({
         <p className="text-sm text-neutral-500">Aucun lot actif.</p>
       ) : (
         <ul className="flex flex-col gap-1.5">
-          {state.data.map((l) => (
-            <li
-              key={l.lot_id ?? l.code ?? Math.random()}
-              className="flex items-center justify-between gap-2 text-sm"
-            >
-              <span className="font-medium truncate">{l.code ?? '—'}</span>
-              <span className="text-xs text-neutral-500 whitespace-nowrap">
-                {qtyFmt.format(l.total_produit ?? 0)} produit · {formatFCFA(l.cout_total ?? 0)}
-              </span>
-            </li>
-          ))}
+          {state.data.map((l) => {
+            const revenu = l.revenu_rattache ?? 0;
+            const cout = l.cout_total ?? 0;
+            const marge = l.marge ?? -cout;
+            const hasRevenue = revenu > 0;
+            return (
+              <li
+                key={l.lot_id ?? l.code ?? Math.random()}
+                className="flex items-center justify-between gap-2 text-sm"
+              >
+                <span className="font-medium truncate">{l.code ?? '—'}</span>
+                {hasRevenue ? (
+                  <span className="text-xs text-neutral-500 whitespace-nowrap">
+                    {formatFCFA(revenu)} − {formatFCFA(cout)} ={' '}
+                    <span
+                      className={
+                        'font-medium ' +
+                        (marge > 0
+                          ? 'text-emerald-700'
+                          : marge < 0
+                            ? 'text-red-700'
+                            : 'text-neutral-700')
+                      }
+                    >
+                      {formatFCFA(marge)}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="text-xs text-neutral-500 whitespace-nowrap">
+                    {formatFCFA(cout)} coût{' '}
+                    <span className="italic text-neutral-400">(pas de revenu rattaché)</span>
+                  </span>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
-      {/* La marge en FCFA n'est pas calculable depuis v_lot_overview seule :
-          les ventes ne portent pas de lot_id. À ajouter quand le lien existera
-          (vue dédiée ou champ sale_items.lot_id). En attendant on montre coût + production. */}
+      {/* La marge ne comptabilise QUE les sale_items rattachés à un lot via
+          sale_items.lot_id. Les ventes non rattachées n'apparaissent pas dans la
+          marge — c'est une vue analytique, pas une duplication du bénéfice global. */}
+      <p className="text-[10px] text-neutral-400 italic mt-1 pt-1 border-t border-neutral-100">
+        Marge calculée sur les ventes rattachées au lot.
+      </p>
     </CardLink>
   );
 }
